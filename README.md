@@ -41,3 +41,11 @@ has passed.
 - `ui/modifier/Acrylic` — acrylic blur modifier
 - `ui/theme/` — NsColor / NsDim / Theme
 - `apps/AppRepository`, `apps/AppEntry` — installed-app catalog
+
+## Download
+
+Direct APK download (rolling link — always the latest recovered build):
+
+**https://github.com/ether4o4/NeverSoft-11/raw/main/recovery/NeverSoft11-v0.1.1.apk**
+
+On your phone: open the link, allow "Install unknown apps" for your browser if prompted, then open the downloaded APK.

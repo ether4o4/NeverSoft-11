@@ -5,39 +5,72 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.unit.dp
 import com.neversoft.launcher.desktop.Desktop
 import com.neversoft.launcher.startmenu.StartMenu
 import com.neversoft.launcher.taskbar.Taskbar
 import com.neversoft.launcher.taskview.TaskView
+import com.neversoft.launcher.theme.LocalLauncherTheme
+import com.neversoft.launcher.theme.ThemePreset
 import com.neversoft.launcher.window.*
 
 @Composable
-fun ShellScreen() {
+fun ShellScreen(
+    selectedPreset: ThemePreset,
+    onSelectPreset: (ThemePreset) -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
     val windowEngine = remember { WindowManagerEngine() }
     var startMenuVisible by remember { mutableStateOf(false) }
     var taskViewVisible by remember { mutableStateOf(false) }
 
-    Box(Modifier.fillMaxSize().background(
-        Brush.radialGradient(listOf(Color(0xFF0D1B3E), Color(0xFF050A1A))))) {
-
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        theme.accentColor.copy(alpha = 0.26f),
+                        theme.surfaceColor.copy(alpha = 0.96f),
+                    ),
+                ),
+            ),
+    ) {
         Desktop(Modifier.fillMaxSize().padding(bottom = 60.dp))
 
-        ShellWindowHost(engine = windowEngine,
-            modifier = Modifier.fillMaxSize().padding(bottom = 60.dp))
+        ShellWindowHost(
+            engine = windowEngine,
+            selectedPreset = selectedPreset,
+            onSelectPreset = onSelectPreset,
+            modifier = Modifier.fillMaxSize().padding(bottom = 60.dp),
+        )
 
         if (taskViewVisible) {
-            TaskView(windows = windowEngine.windows,
-                onWindowFocus = { id -> windowEngine.restoreWindow(id); windowEngine.focusWindow(id); taskViewVisible = false },
+            TaskView(
+                windows = windowEngine.windows,
+                onWindowFocus = { id ->
+                    windowEngine.restoreWindow(id)
+                    windowEngine.focusWindow(id)
+                    taskViewVisible = false
+                },
                 onWindowClose = { id -> windowEngine.closeWindow(id) },
-                onDismiss = { taskViewVisible = false })
+                onDismiss = { taskViewVisible = false },
+            )
         }
 
         if (startMenuVisible) {
             StartMenu(
                 onDismiss = { startMenuVisible = false },
-                onOpenFileExplorer = { windowEngine.openWindow(WindowContentType.FILE_EXPLORER, "File Explorer"); startMenuVisible = false },
-                onOpenControlPanel = { windowEngine.openWindow(WindowContentType.CONTROL_PANEL, "Control Panel"); startMenuVisible = false },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp))
+                onOpenFileExplorer = {
+                    windowEngine.openWindow(WindowContentType.FILE_EXPLORER, "File Explorer")
+                    startMenuVisible = false
+                },
+                onOpenControlPanel = {
+                    windowEngine.openWindow(WindowContentType.CONTROL_PANEL, "Control Panel")
+                    startMenuVisible = false
+                },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp),
+            )
         }
 
         Taskbar(
@@ -46,10 +79,11 @@ fun ShellScreen() {
             openWindows = windowEngine.windows,
             onWindowTaskbarClick = { id ->
                 val w = windowEngine.windows.find { it.id == id }
-                if (w?.state == com.neversoft.launcher.window.WindowState.MINIMIZED) windowEngine.restoreWindow(id)
+                if (w?.state == WindowState.MINIMIZED) windowEngine.restoreWindow(id)
                 windowEngine.focusWindow(id)
                 startMenuVisible = false
             },
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(60.dp))
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(60.dp),
+        )
     }
 }

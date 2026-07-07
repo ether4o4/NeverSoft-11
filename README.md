@@ -1,51 +1,23 @@
 # NeverSoft 11
 
-Windows 11–style Android launcher (`com.neversoft.launcher`).
+A near 1:1 Windows 11 OS shell replica for Android.
 
-The original repository was accidentally deleted. This repo holds everything
-recovered from the last surviving build, **NeverSoft11-v0.1.1.apk**, plus the
-recovery notes below.
+## Build
+```bash
+./gradlew assembleDebug
+```
 
-## What's in here
+## Architecture
+See `neversoft-11-mashup-spec.md` for full spec.
 
-| Path | Contents |
-|---|---|
-| `recovery/NeverSoft11-v0.1.1.apk` | The last surviving build (installable) |
-| `recovery/decompiled-src/` | App source decompiled from the APK with jadx (Java form of the original Kotlin) |
-| `recovery/resources/AndroidManifest.xml` | Decoded manifest |
-| `recovery/resources/res/` | Decoded resources (themes, strings, drawables, icons) |
-| `recovery/resources/assets/` | App assets |
-
-## Build info recovered from the APK
-
-- App name: **NeverSoft 11**, package `com.neversoft.launcher`
-- versionName `11.0`, versionCode 1, minSdk 29, targetSdk 35
-- Jetpack Compose (Material 3), Kotlin 2.0.21, Gradle 8.11.1
-- Built from git commit `c6d05581eac0961dd7905c0a945d24ba151912e2` (original repo, now deleted)
-- APK SHA-256: `f916de19db45bd6eb140bd5cc10344c613cbde2bbf7c3b48d50597425277d731`
-
-## Restoring the original repo (best option)
-
-GitHub keeps deleted repositories restorable for ~90 days:
-**Settings → Repositories → Deleted repositories** → <https://github.com/settings/deleted_repositories>.
-Restoring it brings back the full Kotlin source and commit history — strictly
-better than the decompiled code here. This repo is the fallback if that window
-has passed.
-
-## App structure (from the decompiled source)
-
-- `MainActivity` — entry point, immersive shell
-- `ui/Shell` — top-level layout: desktop, taskbar, overlays
-- `ui/Desktop`, `ui/Taskbar`, `ui/StartMenu`, `ui/TaskView`, `ui/Widgets`, `ui/Flyouts`, `ui/ContextMenu` — the Windows-11-style surfaces
-- `ui/window/AppWindow` — floating/snapped app windows
-- `ui/modifier/Acrylic` — acrylic blur modifier
-- `ui/theme/` — NsColor / NsDim / Theme
-- `apps/AppRepository`, `apps/AppEntry` — installed-app catalog
-
-## Download
-
-Direct APK download (rolling link — always the latest recovered build):
-
-**https://github.com/ether4o4/NeverSoft-11/raw/main/recovery/NeverSoft11-v0.1.1.apk**
-
-On your phone: open the link, allow "Install unknown apps" for your browser if prompted, then open the downloaded APK.
+## Phases
+| Phase | Status | Description |
+|---|---|---|
+| 0 | ✅ | Clean Kotlin Compose scaffold |
+| 1 | ⏳ | Theme engine + DataStore |
+| 2 | ⏳ | Window manager |
+| 3 | ⏳ | Start menu + Spotlight |
+| 4 | ⏳ | File Explorer |
+| 5 | ⏳ | Desktop DnD |
+| 6 | ⏳ | Task View |
+| 7 | ⏳ | Polish + APK |

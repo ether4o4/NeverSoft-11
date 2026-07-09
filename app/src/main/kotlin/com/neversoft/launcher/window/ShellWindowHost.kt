@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.zIndex
 import com.neversoft.launcher.controlpanel.ControlPanelWindow
 import com.neversoft.launcher.fileexplorer.FileExplorerWindow
 import com.neversoft.launcher.theme.LocalLauncherTheme

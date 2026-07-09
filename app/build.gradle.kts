@@ -12,8 +12,39 @@ android {
         applicationId = "com.neversoft.launcher"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.1.0"
+    }
+
+    // Keystore comes from the environment (CI injects it from GitHub
+    // Secrets, or generates a throwaway one). Nothing secret in the repo.
+    val envKeystorePath: String? = System.getenv("NS_KEYSTORE_PATH")
+
+    signingConfigs {
+        create("release") {
+            if (envKeystorePath != null) {
+                storeFile = file(envKeystorePath)
+                storePassword = System.getenv("NS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("NS_KEY_ALIAS")
+                keyPassword = System.getenv("NS_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = if (envKeystorePath != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
     }
 
     compileOptions {

@@ -10,6 +10,7 @@ import com.neversoft.launcher.desktop.Desktop
 import com.neversoft.launcher.startmenu.StartMenu
 import com.neversoft.launcher.taskbar.Taskbar
 import com.neversoft.launcher.taskview.TaskView
+import com.neversoft.launcher.theme.DesktopWallpaper
 import com.neversoft.launcher.theme.LocalLauncherTheme
 import com.neversoft.launcher.theme.ThemePreset
 import com.neversoft.launcher.window.*
@@ -27,11 +28,12 @@ fun ShellScreen(
     Box(
         Modifier
             .fillMaxSize()
+            .background(DesktopWallpaper.brush)
             .background(
                 Brush.radialGradient(
                     colors = listOf(
-                        theme.accentColor.copy(alpha = 0.26f),
-                        theme.surfaceColor.copy(alpha = 0.96f),
+                        theme.accentColor.copy(alpha = 0.20f),
+                        Color.Transparent,
                     ),
                 ),
             ),

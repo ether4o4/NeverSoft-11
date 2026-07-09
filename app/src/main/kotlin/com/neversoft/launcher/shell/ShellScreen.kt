@@ -36,7 +36,10 @@ fun ShellScreen(
                 ),
             ),
     ) {
-        Desktop(Modifier.fillMaxSize().padding(bottom = 60.dp))
+        Desktop(
+            onOpenWindow = { type, title -> windowEngine.openWindow(type, title) },
+            modifier = Modifier.fillMaxSize().padding(bottom = 60.dp),
+        )
 
         ShellWindowHost(
             engine = windowEngine,

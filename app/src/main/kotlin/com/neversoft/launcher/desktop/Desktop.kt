@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neversoft.launcher.data.AppSettings
+import com.neversoft.launcher.fileexplorer.FileOps
 import com.neversoft.launcher.window.WindowContentType
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -36,11 +37,12 @@ private data class DesktopShortcut(
     val icon: ImageVector,
     val windowType: WindowContentType,
     val windowTitle: String,
+    val payload: String? = null,
 )
 
 @Composable
 fun Desktop(
-    onOpenWindow: (WindowContentType, String) -> Unit,
+    onOpenWindow: (WindowContentType, String, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -50,7 +52,10 @@ fun Desktop(
     val shortcuts = remember {
         listOf(
             DesktopShortcut("files", "File Explorer", Icons.Default.Folder, WindowContentType.FILE_EXPLORER, "File Explorer"),
-            DesktopShortcut("bin", "Recycle Bin", Icons.Default.Delete, WindowContentType.FILE_EXPLORER, "Recycle Bin"),
+            DesktopShortcut(
+                "bin", "Recycle Bin", Icons.Default.Delete, WindowContentType.FILE_EXPLORER, "Recycle Bin",
+                payload = FileOps.recycleBinDir().absolutePath,
+            ),
             DesktopShortcut("browser", "Browser", Icons.Default.Language, WindowContentType.BROWSER, "Browser"),
             DesktopShortcut("terminal", "Terminal", Icons.Default.Terminal, WindowContentType.TERMINAL, "Terminal"),
         )
@@ -108,7 +113,7 @@ fun Desktop(
                             }
                             .pointerInput(shortcut.id) {
                                 detectTapGestures(
-                                    onTap = { onOpenWindow(shortcut.windowType, shortcut.windowTitle) },
+                                    onTap = { onOpenWindow(shortcut.windowType, shortcut.windowTitle, shortcut.payload) },
                                 )
                             },
                     )

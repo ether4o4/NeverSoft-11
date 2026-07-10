@@ -3,6 +3,7 @@ package com.neversoft.launcher.theme
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 
 enum class ThemePreset { GLASS, MACBOOK, RED, PURPLE, BLUE, GREEN, BLACK, DARK_GREY, LIGHT_GREY, WHITE }
 
@@ -22,6 +23,30 @@ data class LauncherTheme(
             surfaceColor.copy(alpha = surfaceAlpha * 0.85f)
         )
     )
+
+    /**
+     * Fully opaque surface for windows and the start menu: the translucent
+     * theme tint composited over a dark base so nothing behind bleeds
+     * through, finished with a subtle top-lit vertical gradient so it still
+     * reads as glass.
+     */
+    fun windowBrush(): Brush {
+        val base = surfaceColor.copy(alpha = surfaceAlpha).compositeOver(WindowBase)
+        return Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.10f).compositeOver(base),
+                base,
+                Color.Black.copy(alpha = 0.12f).compositeOver(base),
+            ),
+        )
+    }
+
+    /** Opaque flat color matching the middle of [windowBrush], for sub-panels. */
+    fun windowSolid(): Color = surfaceColor.copy(alpha = surfaceAlpha).compositeOver(WindowBase)
+
+    private companion object {
+        val WindowBase = Color(0xFF151C28)
+    }
 }
 
 object LauncherThemes {

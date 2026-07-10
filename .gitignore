@@ -1,0 +1,15 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Local SDK config
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Signing
+*.keystore
+*.jks

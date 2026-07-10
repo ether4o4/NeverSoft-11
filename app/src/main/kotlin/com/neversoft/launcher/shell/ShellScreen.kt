@@ -39,7 +39,7 @@ fun ShellScreen(
             ),
     ) {
         Desktop(
-            onOpenWindow = { type, title -> windowEngine.openWindow(type, title) },
+            onOpenWindow = { type, title, payload -> windowEngine.openWindow(type, title, payload) },
             modifier = Modifier.fillMaxSize().padding(bottom = 60.dp),
         )
 
@@ -66,15 +66,8 @@ fun ShellScreen(
         if (startMenuVisible) {
             StartMenu(
                 onDismiss = { startMenuVisible = false },
-                onOpenFileExplorer = {
-                    windowEngine.openWindow(WindowContentType.FILE_EXPLORER, "File Explorer")
-                    startMenuVisible = false
-                },
-                onOpenControlPanel = {
-                    windowEngine.openWindow(WindowContentType.CONTROL_PANEL, "Control Panel")
-                    startMenuVisible = false
-                },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp),
+                onOpenWindow = { type, title -> windowEngine.openWindow(type, title) },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 68.dp),
             )
         }
 

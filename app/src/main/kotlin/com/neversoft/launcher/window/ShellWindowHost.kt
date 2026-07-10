@@ -1,6 +1,5 @@
 package com.neversoft.launcher.window
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -18,6 +17,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.zIndex
 import com.neversoft.launcher.controlpanel.ControlPanelWindow
@@ -40,21 +40,9 @@ fun ShellWindowHost(
                 key(window.id) {
                     ShellWindowCard(
                         window = window,
+                        engine = engine,
                         selectedPreset = selectedPreset,
                         onSelectPreset = onSelectPreset,
-                        onFocus = { engine.reorderToFront(window.id) },
-                        onMove = { delta ->
-                            engine.moveWindow(
-                                window.id,
-                                Offset(window.position.x + delta.x, window.position.y + delta.y),
-                            )
-                        },
-                        onMinimize = { engine.toggleMinimize(window.id) },
-                        onMaximizeRestore = {
-                            if (window.state == WindowState.MAXIMIZED) engine.restoreWindow(window.id)
-                            else engine.maximizeWindow(window.id)
-                        },
-                        onClose = { engine.closeWindow(window.id) },
                     )
                 }
             }
@@ -64,16 +52,17 @@ fun ShellWindowHost(
 @Composable
 fun ShellWindowCard(
     window: ShellWindow,
+    engine: WindowManagerEngine,
     selectedPreset: ThemePreset,
     onSelectPreset: (ThemePreset) -> Unit,
-    onFocus: () -> Unit,
-    onMove: (Offset) -> Unit,
-    onMinimize: () -> Unit,
-    onMaximizeRestore: () -> Unit,
-    onClose: () -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
+    val density = LocalDensity.current
     val isMaximized = window.state == WindowState.MAXIMIZED
+    // Gesture callbacks below resolve the window by id INSIDE the engine at
+    // event time. pointerInput coroutines outlive recompositions, so they
+    // must never capture this composition's `window` snapshot for positions.
+    val windowId = window.id
     val offsetMod = if (isMaximized) {
         Modifier.fillMaxSize()
     } else {
@@ -84,67 +73,112 @@ fun ShellWindowCard(
     Card(
         modifier = offsetMod
             .zIndex(window.zIndex.toFloat())
-            .pointerInput(Unit) { detectTapGestures { onFocus() } }
+            .pointerInput(windowId) { detectTapGestures { engine.focusWindow(windowId) } }
             .shadow(8.dp, RoundedCornerShape(10.dp)),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
     ) {
-        Column(Modifier.fillMaxSize().background(theme.surfaceBrush())) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(36.dp)
-                    .background(theme.accentColor.copy(alpha = 0.18f))
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragStart = { onFocus() },
-                            onDrag = { _, drag -> if (!isMaximized) onMove(drag) },
-                        )
+        Box(Modifier.fillMaxSize().background(theme.windowBrush())) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .background(theme.accentColor.copy(alpha = 0.18f))
+                        .pointerInput(windowId) {
+                            detectDragGestures(
+                                onDragStart = { engine.focusWindow(windowId) },
+                                onDrag = { change, drag ->
+                                    change.consume()
+                                    engine.dragBy(windowId, drag)
+                                },
+                            )
+                        }
+                        .pointerInput(windowId) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    val w = engine.windows.find { it.id == windowId } ?: return@detectTapGestures
+                                    if (w.state == WindowState.MAXIMIZED) engine.restoreWindow(windowId)
+                                    else engine.maximizeWindow(windowId)
+                                },
+                            )
+                        }
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        window.contentType.toIcon(),
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = theme.onSurface,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        window.title,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = theme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = { engine.toggleMinimize(windowId) },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Text("—", color = theme.onSurface, fontSize = 12.sp)
                     }
-                    .padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    window.contentType.toIcon(),
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = theme.onSurface,
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    window.title,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = theme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = onMinimize,
-                    contentPadding = PaddingValues(0.dp),
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Text("—", color = theme.onSurface, fontSize = 12.sp)
+                    TextButton(
+                        onClick = {
+                            if (window.state == WindowState.MAXIMIZED) engine.restoreWindow(windowId)
+                            else engine.maximizeWindow(windowId)
+                        },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Text(if (isMaximized) "❐" else "□", color = theme.onSurface, fontSize = 12.sp)
+                    }
+                    TextButton(
+                        onClick = { engine.closeWindow(windowId) },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Text("✕", color = Color(0xFFFF4444), fontSize = 12.sp)
+                    }
                 }
-                TextButton(
-                    onClick = onMaximizeRestore,
-                    contentPadding = PaddingValues(0.dp),
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Text(if (isMaximized) "❐" else "□", color = theme.onSurface, fontSize = 12.sp)
-                }
-                TextButton(
-                    onClick = onClose,
-                    contentPadding = PaddingValues(0.dp),
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Text("✕", color = Color(0xFFFF4444), fontSize = 12.sp)
+                Box(Modifier.fillMaxSize()) {
+                    WindowContent(
+                        window = window,
+                        selectedPreset = selectedPreset,
+                        onSelectPreset = onSelectPreset,
+                    )
                 }
             }
-            Box(Modifier.fillMaxSize()) {
-                WindowContent(
-                    window = window,
-                    selectedPreset = selectedPreset,
-                    onSelectPreset = onSelectPreset,
-                )
+
+            // Resize grip — bottom-right corner, hidden when maximized.
+            if (!isMaximized) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(26.dp)
+                        .pointerInput(windowId) {
+                            detectDragGestures(
+                                onDragStart = { engine.focusWindow(windowId) },
+                                onDrag = { change, drag ->
+                                    change.consume()
+                                    with(density) {
+                                        engine.resizeBy(windowId, drag.x.toDp(), drag.y.toDp())
+                                    }
+                                },
+                            )
+                        },
+                    contentAlignment = Alignment.BottomEnd,
+                ) {
+                    Text(
+                        "◢",
+                        color = theme.onSurface.copy(alpha = 0.35f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(end = 4.dp, bottom = 2.dp),
+                    )
+                }
             }
         }
     }
@@ -157,7 +191,7 @@ fun WindowContent(
     onSelectPreset: (ThemePreset) -> Unit,
 ) {
     when (window.contentType) {
-        WindowContentType.FILE_EXPLORER -> FileExplorerWindow()
+        WindowContentType.FILE_EXPLORER -> FileExplorerWindow(initialPath = window.payload)
         WindowContentType.CONTROL_PANEL -> ControlPanelWindow(
             selectedPreset = selectedPreset,
             onSelectPreset = onSelectPreset,

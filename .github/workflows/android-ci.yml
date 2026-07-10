@@ -11,6 +11,9 @@ concurrency:
   group: android-ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -46,6 +49,26 @@ jobs:
       - name: Run lint
         run: ./gradlew :app:lintDebug --stacktrace --no-daemon
 
+      - name: Prepare release keystore
+        env:
+          KS_B64: ${{ secrets.NEVERSOFT_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ns-release.keystore"
+            {
+              echo "NS_KEYSTORE_PATH=$RUNNER_TEMP/ns-release.keystore"
+              echo "NS_KEYSTORE_PASSWORD=${{ secrets.NEVERSOFT_KEYSTORE_PASSWORD }}"
+              echo "NS_KEY_ALIAS=${{ secrets.NEVERSOFT_KEY_ALIAS }}"
+              echo "NS_KEY_PASSWORD=${{ secrets.NEVERSOFT_KEY_PASSWORD }}"
+            } >> "$GITHUB_ENV"
+            echo "Using keystore from repository secrets."
+          else
+            echo "No keystore secrets configured — release will use an ephemeral signing key."
+          fi
+
+      - name: Assemble release
+        run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
+
       - name: Upload APK artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -53,6 +76,26 @@ jobs:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
+
+      - name: Upload release APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+
+      - name: Publish rolling latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk NeverSoft11.apk
+          gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create latest --repo "$GITHUB_REPOSITORY" \
+              --title "NeverSoft 11 — latest build" \
+              --notes "Rolling release. Automatically updated with the release APK from every push to main."
+          gh release upload latest NeverSoft11.apk --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Upload reports
         if: always()

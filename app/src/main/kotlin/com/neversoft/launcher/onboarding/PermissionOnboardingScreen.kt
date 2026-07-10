@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.neversoft.launcher.theme.DesktopWallpaper
 import com.neversoft.launcher.theme.LocalLauncherTheme
 
 @Composable
@@ -75,6 +76,7 @@ fun PermissionOnboardingScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .background(DesktopWallpaper.brush)
             .background(theme.surfaceBrush())
             .padding(24.dp),
         contentAlignment = Alignment.Center,
@@ -150,6 +152,7 @@ private fun PermissionRow(label: String, granted: Boolean) {
     Text(
         text = if (granted) "✓ $label" else "• $label",
         style = MaterialTheme.typography.bodyMedium,
+        color = LocalLauncherTheme.current.onSurface,
     )
 }
 

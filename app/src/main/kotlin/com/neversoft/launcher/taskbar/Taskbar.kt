@@ -106,6 +106,13 @@ fun Taskbar(
         }
     }
 
+    // Custom Start button image (falls back to the four-pane logo)
+    val orbPath by AppSettings.orbImageFlow(context).collectAsState(initial = "")
+    val orbBitmap = remember(orbPath) {
+        orbPath.takeIf { it.isNotEmpty() && java.io.File(it).exists() }
+            ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 128)?.asImageBitmap() }
+    }
+
     // Taskbar pins, shared with the Start menu via DataStore
     val dockPinsJson by AppSettings.dockPinsFlow(context).collectAsState(initial = "[]")
     val pinnedPkgs = remember(dockPinsJson) {
@@ -152,7 +159,16 @@ fun Taskbar(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     TaskbarButton(onClick = onStartClick) {
-                        StartLogo(22.dp)
+                        if (orbBitmap != null) {
+                            Image(
+                                bitmap = orbBitmap,
+                                contentDescription = "Start",
+                                modifier = Modifier.size(26.dp).clip(RoundedCornerShape(5.dp)),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            )
+                        } else {
+                            StartLogo(22.dp)
+                        }
                     }
                     TaskbarButton(onClick = onSearchClick) {
                         Icon(Icons.Outlined.Search, "Search", Modifier.size(22.dp), tint = theme.text)

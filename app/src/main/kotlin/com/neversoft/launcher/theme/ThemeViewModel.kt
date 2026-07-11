@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 class ThemeViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application.applicationContext
 
-    private val _currentPreset = MutableStateFlow(ThemePreset.GLASS)
+    private val _currentPreset = MutableStateFlow(ThemePreset.DARK)
     val currentPreset: StateFlow<ThemePreset> = _currentPreset
 
     val currentTheme: StateFlow<LauncherTheme> = _currentPreset
@@ -22,14 +22,15 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
-            initialValue = LauncherThemes.Glass,
+            initialValue = LauncherThemes.Dark,
         )
 
     init {
         viewModelScope.launch {
             AppSettings.themeFlow(context).collect { presetName ->
+                // Legacy stored presets (GLASS etc.) fall back to Dark
                 val preset = runCatching { ThemePreset.valueOf(presetName) }
-                    .getOrDefault(ThemePreset.GLASS)
+                    .getOrDefault(ThemePreset.DARK)
                 _currentPreset.value = preset
             }
         }

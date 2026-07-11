@@ -18,7 +18,7 @@ object AppSettings {
     val KEY_DESKTOP_ICON_POSITIONS    = stringPreferencesKey("desktop_icon_positions")
 
     fun themeFlow(context: Context): Flow<String> =
-        context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "GLASS" }
+        context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
 
     fun dockPinsFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_DOCK_PINS] ?: "[]" }

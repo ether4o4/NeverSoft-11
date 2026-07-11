@@ -41,7 +41,7 @@ private fun NeverSoftRoot() {
     val currentPreset by themeViewModel.currentPreset.collectAsState()
     val isFirstRun by AppSettings.isFirstRunFlow(context).collectAsState(initial = true)
 
-    MaterialTheme {
+    MaterialTheme(typography = com.neversoft.launcher.theme.NsTypography) {
         CompositionLocalProvider(LocalLauncherTheme provides currentTheme) {
             if (isFirstRun) {
                 PermissionOnboardingScreen(

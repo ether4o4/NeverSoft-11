@@ -134,6 +134,27 @@ fun StartMenu(
         }
     }
 
+    // Taskbar pins, shared with the taskbar via DataStore
+    var dockPins by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        com.neversoft.launcher.data.AppSettings.dockPinsFlow(context).collect { json ->
+            dockPins = runCatching {
+                val arr = org.json.JSONArray(json)
+                List(arr.length()) { arr.getString(it) }
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    fun toggleDockPin(pkg: String) {
+        val newPins = if (dockPins.contains(pkg)) dockPins - pkg else dockPins + pkg
+        dockPins = newPins
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setDockPins(
+                context, org.json.JSONArray(newPins).toString(),
+            )
+        }
+    }
+
     val searchEngine = remember {
         LauncherSearchEngine(
             listOf(AppSearchProvider { apps }, SettingsSearchProvider(), FileSearchProvider()),
@@ -214,6 +235,7 @@ fun StartMenu(
                     StartView.PINNED -> PinnedView(
                         apps = apps, appsLoaded = appsLoaded, columns = columns,
                         pins = pins,
+                        dockPins = dockPins,
                         recentFiles = recentFiles,
                         onAllApps = { view = StartView.ALL_APPS },
                         onLaunch = { app ->
@@ -221,6 +243,7 @@ fun StartMenu(
                             onDismiss()
                         },
                         onUnpin = { pkg -> setPins(pins - pkg) },
+                        onToggleDockPin = { pkg -> toggleDockPin(pkg) },
                         onOpenFile = { file ->
                             FileOpener.open(context, file)
                             onDismiss()
@@ -229,6 +252,7 @@ fun StartMenu(
                     StartView.ALL_APPS -> AllAppsView(
                         apps = apps,
                         pins = pins,
+                        dockPins = dockPins,
                         onBack = { view = StartView.PINNED },
                         onLaunch = { app ->
                             InstalledAppsRepository.launch(context, app.packageName)
@@ -237,6 +261,7 @@ fun StartMenu(
                         onTogglePin = { pkg ->
                             setPins(if (pins.contains(pkg)) pins - pkg else pins + pkg)
                         },
+                        onToggleDockPin = { pkg -> toggleDockPin(pkg) },
                     )
                     StartView.SEARCH -> SearchResultsView(
                         query = query, results = results, apps = apps,
@@ -379,10 +404,12 @@ private fun PinnedView(
     appsLoaded: Boolean,
     columns: Int,
     pins: List<String>,
+    dockPins: List<String>,
     recentFiles: List<File>,
     onAllApps: () -> Unit,
     onLaunch: (InstalledApp) -> Unit,
     onUnpin: (String) -> Unit,
+    onToggleDockPin: (String) -> Unit,
     onOpenFile: (File) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
@@ -410,8 +437,10 @@ private fun PinnedView(
                         PinnedAppTile(
                             app = app,
                             canUnpin = hasCustomPins,
+                            isDockPinned = dockPins.contains(app.packageName),
                             onClick = { onLaunch(app) },
                             onUnpin = { onUnpin(app.packageName) },
+                            onToggleDockPin = { onToggleDockPin(app.packageName) },
                         )
                     }
                 }
@@ -444,8 +473,10 @@ private fun PinnedView(
 private fun PinnedAppTile(
     app: InstalledApp,
     canUnpin: Boolean,
+    isDockPinned: Boolean,
     onClick: () -> Unit,
     onUnpin: () -> Unit,
+    onToggleDockPin: () -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     var menuOpen by remember { mutableStateOf(false) }
@@ -455,7 +486,7 @@ private fun PinnedAppTile(
                 .clip(RoundedCornerShape(4.dp))
                 .combinedClickable(
                     onClick = onClick,
-                    onLongClick = { if (canUnpin) menuOpen = true },
+                    onLongClick = { menuOpen = true },
                 )
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -483,9 +514,18 @@ private fun PinnedAppTile(
             shape = RoundedCornerShape(8.dp),
             containerColor = theme.menuSurface,
         ) {
-            ContextMenuItem(Icons.Outlined.PushPin, "Unpin from Start") {
+            if (canUnpin) {
+                ContextMenuItem(Icons.Outlined.PushPin, "Unpin from Start") {
+                    menuOpen = false
+                    onUnpin()
+                }
+            }
+            ContextMenuItem(
+                Icons.Outlined.PushPin,
+                if (isDockPinned) "Unpin from taskbar" else "Pin to taskbar",
+            ) {
                 menuOpen = false
-                onUnpin()
+                onToggleDockPin()
             }
         }
     }
@@ -543,9 +583,11 @@ private fun RecommendedTile(file: File, onClick: () -> Unit) {
 private fun AllAppsView(
     apps: List<InstalledApp>,
     pins: List<String>,
+    dockPins: List<String>,
     onBack: () -> Unit,
     onLaunch: (InstalledApp) -> Unit,
     onTogglePin: (String) -> Unit,
+    onToggleDockPin: (String) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
@@ -608,6 +650,14 @@ private fun AllAppsView(
                             ) {
                                 menuOpen = false
                                 onTogglePin(app.packageName)
+                            }
+                            ContextMenuItem(
+                                Icons.Outlined.PushPin,
+                                if (dockPins.contains(app.packageName)) "Unpin from taskbar"
+                                else "Pin to taskbar",
+                            ) {
+                                menuOpen = false
+                                onToggleDockPin(app.packageName)
                             }
                         }
                     }

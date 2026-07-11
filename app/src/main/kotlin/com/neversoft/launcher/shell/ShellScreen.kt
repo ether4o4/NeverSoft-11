@@ -9,10 +9,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,12 +24,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.neversoft.launcher.desktop.Desktop
 import com.neversoft.launcher.startmenu.PowerAction
 import com.neversoft.launcher.startmenu.StartMenu
 import com.neversoft.launcher.taskbar.CalendarFlyout
 import com.neversoft.launcher.taskbar.QuickSettingsFlyout
+import com.neversoft.launcher.taskbar.TASKBAR_HEIGHT_DP
 import com.neversoft.launcher.taskbar.Taskbar
 import com.neversoft.launcher.taskview.TaskView
 import com.neversoft.launcher.theme.BloomWallpaper
@@ -45,8 +50,6 @@ private fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-private const val TASKBAR_HEIGHT = 48
-
 @Composable
 fun ShellScreen(
     selectedPreset: ThemePreset,
@@ -59,21 +62,27 @@ fun ShellScreen(
     var locked by remember { mutableStateOf(false) }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val context = androidx.compose.ui.platform.LocalContext.current
+        val context = LocalContext.current
         val menuWidth = if (maxWidth < 620.dp) maxWidth - 24.dp else 596.dp
+
+        // Keep shell content clear of the Android status bar and gesture area
+        val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val bottomBar = TASKBAR_HEIGHT_DP.dp + 1.dp + navBottom
+        val contentPadding = Modifier.fillMaxSize().padding(top = statusTop, bottom = bottomBar)
 
         BloomWallpaper(isDark = theme.isDark, modifier = Modifier.fillMaxSize())
 
         Desktop(
             onOpenWindow = { type, title, param -> windowEngine.openWindow(type, title, param) },
-            modifier = Modifier.fillMaxSize().padding(bottom = TASKBAR_HEIGHT.dp),
+            modifier = contentPadding,
         )
 
         ShellWindowHost(
             engine = windowEngine,
             selectedPreset = selectedPreset,
             onSelectPreset = onSelectPreset,
-            modifier = Modifier.fillMaxSize().padding(bottom = TASKBAR_HEIGHT.dp),
+            modifier = contentPadding,
         )
 
         if (taskViewVisible) {
@@ -87,20 +96,17 @@ fun ShellScreen(
                 },
                 onWindowClose = { id -> windowEngine.closeWindow(id) },
                 onDismiss = { taskViewVisible = false },
-                modifier = Modifier.fillMaxSize().padding(bottom = TASKBAR_HEIGHT.dp),
+                modifier = contentPadding,
             )
         }
 
         // Click-away scrim for open flyouts
         if (flyout != Flyout.NONE) {
             Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(bottom = TASKBAR_HEIGHT.dp)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { flyout = Flyout.NONE },
+                contentPadding.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { flyout = Flyout.NONE },
             )
         }
 
@@ -130,7 +136,7 @@ fun ShellScreen(
                 searchFocused = flyout == Flyout.SEARCH,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = (TASKBAR_HEIGHT + 8).dp)
+                    .padding(bottom = bottomBar + 8.dp, top = statusTop + 8.dp)
                     .width(menuWidth),
             )
         }
@@ -139,7 +145,7 @@ fun ShellScreen(
             QuickSettingsFlyout(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = (TASKBAR_HEIGHT + 8).dp),
+                    .padding(end = 12.dp, bottom = bottomBar + 8.dp),
             )
         }
 
@@ -147,7 +153,7 @@ fun ShellScreen(
             CalendarFlyout(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = (TASKBAR_HEIGHT + 8).dp),
+                    .padding(end = 12.dp, bottom = bottomBar + 8.dp),
             )
         }
 
@@ -156,10 +162,6 @@ fun ShellScreen(
             onSearchClick = { flyout = if (flyout == Flyout.SEARCH) Flyout.NONE else Flyout.SEARCH },
             onTaskViewClick = {
                 taskViewVisible = !taskViewVisible
-                flyout = Flyout.NONE
-            },
-            onExplorerClick = {
-                windowEngine.openWindow(WindowContentType.FILE_EXPLORER, "File Explorer")
                 flyout = Flyout.NONE
             },
             openWindows = windowEngine.windows,
@@ -188,8 +190,7 @@ fun ShellScreen(
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(TASKBAR_HEIGHT.dp),
+                .fillMaxWidth(),
         )
 
         if (locked) {

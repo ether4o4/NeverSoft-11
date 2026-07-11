@@ -5,8 +5,10 @@ import android.content.Intent
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -39,8 +41,10 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,6 +77,7 @@ import com.neversoft.launcher.search.ResultType
 import com.neversoft.launcher.search.SearchResult
 import com.neversoft.launcher.search.SettingsSearchProvider
 import com.neversoft.launcher.theme.LocalLauncherTheme
+import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -96,6 +101,7 @@ fun StartMenu(
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
 
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var view by remember { mutableStateOf(if (searchFocused) StartView.SEARCH else StartView.PINNED) }
     var powerMenuOpen by remember { mutableStateOf(false) }
@@ -107,6 +113,47 @@ fun StartMenu(
         appsLoaded = true
     }
     val recentFiles = remember { loadRecentFiles() }
+
+    // User-chosen pinned apps (package names, in pin order)
+    var pins by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        com.neversoft.launcher.data.AppSettings.startPinsFlow(context).collect { json ->
+            pins = runCatching {
+                val arr = org.json.JSONArray(json)
+                List(arr.length()) { arr.getString(it) }
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    fun setPins(newPins: List<String>) {
+        pins = newPins
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setStartPins(
+                context, org.json.JSONArray(newPins).toString(),
+            )
+        }
+    }
+
+    // Taskbar pins, shared with the taskbar via DataStore
+    var dockPins by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        com.neversoft.launcher.data.AppSettings.dockPinsFlow(context).collect { json ->
+            dockPins = runCatching {
+                val arr = org.json.JSONArray(json)
+                List(arr.length()) { arr.getString(it) }
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    fun toggleDockPin(pkg: String) {
+        val newPins = if (dockPins.contains(pkg)) dockPins - pkg else dockPins + pkg
+        dockPins = newPins
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setDockPins(
+                context, org.json.JSONArray(newPins).toString(),
+            )
+        }
+    }
 
     val searchEngine = remember {
         LauncherSearchEngine(
@@ -187,12 +234,16 @@ fun StartMenu(
                 when (view) {
                     StartView.PINNED -> PinnedView(
                         apps = apps, appsLoaded = appsLoaded, columns = columns,
+                        pins = pins,
+                        dockPins = dockPins,
                         recentFiles = recentFiles,
                         onAllApps = { view = StartView.ALL_APPS },
                         onLaunch = { app ->
                             InstalledAppsRepository.launch(context, app.packageName)
                             onDismiss()
                         },
+                        onUnpin = { pkg -> setPins(pins - pkg) },
+                        onToggleDockPin = { pkg -> toggleDockPin(pkg) },
                         onOpenFile = { file ->
                             FileOpener.open(context, file)
                             onDismiss()
@@ -200,11 +251,17 @@ fun StartMenu(
                     )
                     StartView.ALL_APPS -> AllAppsView(
                         apps = apps,
+                        pins = pins,
+                        dockPins = dockPins,
                         onBack = { view = StartView.PINNED },
                         onLaunch = { app ->
                             InstalledAppsRepository.launch(context, app.packageName)
                             onDismiss()
                         },
+                        onTogglePin = { pkg ->
+                            setPins(if (pins.contains(pkg)) pins - pkg else pins + pkg)
+                        },
+                        onToggleDockPin = { pkg -> toggleDockPin(pkg) },
                     )
                     StartView.SEARCH -> SearchResultsView(
                         query = query, results = results, apps = apps,
@@ -346,12 +403,21 @@ private fun PinnedView(
     apps: List<InstalledApp>,
     appsLoaded: Boolean,
     columns: Int,
+    pins: List<String>,
+    dockPins: List<String>,
     recentFiles: List<File>,
     onAllApps: () -> Unit,
     onLaunch: (InstalledApp) -> Unit,
+    onUnpin: (String) -> Unit,
+    onToggleDockPin: (String) -> Unit,
     onOpenFile: (File) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
+    // Explicit pins in pin order; fall back to the first apps until the user pins their own
+    val pinnedApps = if (pins.isEmpty()) apps.take(columns * 3)
+    else pins.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }
+    val hasCustomPins = pins.isNotEmpty()
+
     Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
         SectionHeader("Pinned", "All apps", onAllApps)
         Spacer(Modifier.height(10.dp))
@@ -360,12 +426,22 @@ private fun PinnedView(
                 !appsLoaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Loading…", color = theme.textSecondary, fontSize = 12.sp)
                 }
-                apps.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No apps installed", color = theme.textSecondary, fontSize = 12.sp)
+                pinnedApps.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "Long-press an app in All apps to pin it here",
+                        color = theme.textSecondary, fontSize = 12.sp,
+                    )
                 }
                 else -> LazyVerticalGrid(columns = GridCells.Fixed(columns)) {
-                    items(apps.take(columns * 3), key = { it.packageName }) { app ->
-                        PinnedAppTile(app) { onLaunch(app) }
+                    items(pinnedApps, key = { it.packageName }) { app ->
+                        PinnedAppTile(
+                            app = app,
+                            canUnpin = hasCustomPins,
+                            isDockPinned = dockPins.contains(app.packageName),
+                            onClick = { onLaunch(app) },
+                            onUnpin = { onUnpin(app.packageName) },
+                            onToggleDockPin = { onToggleDockPin(app.packageName) },
+                        )
                     }
                 }
             }
@@ -392,32 +468,85 @@ private fun PinnedView(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PinnedAppTile(app: InstalledApp, onClick: () -> Unit) {
+private fun PinnedAppTile(
+    app: InstalledApp,
+    canUnpin: Boolean,
+    isDockPinned: Boolean,
+    onClick: () -> Unit,
+    onUnpin: () -> Unit,
+    onToggleDockPin: () -> Unit,
+) {
     val theme = LocalLauncherTheme.current
-    Column(
-        Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .clickable { onClick() }
-            .padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        if (app.icon != null) {
-            Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(32.dp))
-        } else {
-            Box(
-                Modifier.size(32.dp).background(theme.card, RoundedCornerShape(6.dp)),
-                contentAlignment = Alignment.Center,
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        Column(
+            Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { menuOpen = true },
+                )
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (app.icon != null) {
+                Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(32.dp))
+            } else {
+                Box(
+                    Modifier.size(32.dp).background(theme.card, RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(app.label.take(1).uppercase(), color = theme.text, fontSize = 14.sp)
+                }
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(
+                app.label, color = theme.text, fontSize = 11.sp, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 2.dp),
+            )
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            shape = RoundedCornerShape(8.dp),
+            containerColor = theme.menuSurface,
+        ) {
+            if (canUnpin) {
+                ContextMenuItem(Icons.Outlined.PushPin, "Unpin from Start") {
+                    menuOpen = false
+                    onUnpin()
+                }
+            }
+            ContextMenuItem(
+                Icons.Outlined.PushPin,
+                if (isDockPinned) "Unpin from taskbar" else "Pin to taskbar",
             ) {
-                Text(app.label.take(1).uppercase(), color = theme.text, fontSize = 14.sp)
+                menuOpen = false
+                onToggleDockPin()
             }
         }
-        Spacer(Modifier.height(5.dp))
-        Text(
-            app.label, color = theme.text, fontSize = 11.sp, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 2.dp),
-        )
+    }
+}
+
+@Composable
+private fun ContextMenuItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
+    Row(
+        Modifier
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(15.dp), tint = theme.text)
+        Spacer(Modifier.width(10.dp))
+        Text(label, color = theme.text, fontSize = 13.sp)
     }
 }
 
@@ -449,11 +578,16 @@ private fun RecommendedTile(file: File, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AllAppsView(
     apps: List<InstalledApp>,
+    pins: List<String>,
+    dockPins: List<String>,
     onBack: () -> Unit,
     onLaunch: (InstalledApp) -> Unit,
+    onTogglePin: (String) -> Unit,
+    onToggleDockPin: (String) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
@@ -474,29 +608,58 @@ private fun AllAppsView(
                     )
                 }
                 items(letterApps, key = { it.packageName }) { app ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable { onLaunch(app) }
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (app.icon != null) {
-                            Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(24.dp))
-                        } else {
-                            Box(
-                                Modifier.size(24.dp).background(theme.card, RoundedCornerShape(5.dp)),
-                                contentAlignment = Alignment.Center,
+                    var menuOpen by remember(app.packageName) { mutableStateOf(false) }
+                    val isPinned = pins.contains(app.packageName)
+                    Box {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(4.dp))
+                                .combinedClickable(
+                                    onClick = { onLaunch(app) },
+                                    onLongClick = { menuOpen = true },
+                                )
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (app.icon != null) {
+                                Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(24.dp))
+                            } else {
+                                Box(
+                                    Modifier.size(24.dp).background(theme.card, RoundedCornerShape(5.dp)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(app.label.take(1).uppercase(), color = theme.text, fontSize = 11.sp)
+                                }
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                app.label, color = theme.text, fontSize = 13.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                            shape = RoundedCornerShape(8.dp),
+                            containerColor = theme.menuSurface,
+                        ) {
+                            ContextMenuItem(
+                                Icons.Outlined.PushPin,
+                                if (isPinned) "Unpin from Start" else "Pin to Start",
                             ) {
-                                Text(app.label.take(1).uppercase(), color = theme.text, fontSize = 11.sp)
+                                menuOpen = false
+                                onTogglePin(app.packageName)
+                            }
+                            ContextMenuItem(
+                                Icons.Outlined.PushPin,
+                                if (dockPins.contains(app.packageName)) "Unpin from taskbar"
+                                else "Pin to taskbar",
+                            ) {
+                                menuOpen = false
+                                onToggleDockPin(app.packageName)
                             }
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            app.label, color = theme.text, fontSize = 13.sp,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
                     }
                 }
             }

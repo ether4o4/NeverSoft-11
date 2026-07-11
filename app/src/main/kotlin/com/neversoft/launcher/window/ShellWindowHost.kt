@@ -64,7 +64,10 @@ fun ShellWindowHost(
                         onMove = { delta ->
                             engine.moveWindow(
                                 window.id,
-                                Offset(window.position.x + delta.x, window.position.y + delta.y),
+                                Offset(
+                                    (window.position.x + delta.x).coerceAtLeast(0f),
+                                    (window.position.y + delta.y).coerceAtLeast(0f),
+                                ),
                             )
                         },
                         onResize = { newSize -> engine.resizeWindow(window.id, newSize) },

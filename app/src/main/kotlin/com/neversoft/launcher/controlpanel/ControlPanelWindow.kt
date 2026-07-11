@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.neversoft.launcher.theme.LauncherThemes
 import com.neversoft.launcher.theme.LocalLauncherTheme
 import com.neversoft.launcher.theme.ThemePreset
 
@@ -230,27 +231,29 @@ private fun PersonalizationPage(
     Column {
         PageTitle("Personalization")
         Spacer(Modifier.height(12.dp))
-        Text("Select a mode", color = theme.textSecondary, fontSize = 12.sp)
+        Text(
+            "Select a theme — it applies to the taskbar, Start menu, flyouts, and windows",
+            color = theme.textSecondary, fontSize = 12.sp,
+        )
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ModeCard(
-                label = "Light",
-                selected = selectedPreset == ThemePreset.LIGHT,
-                previewTop = Color(0xFF9CC7EE),
-                previewSurface = Color(0xFFF3F3F3),
-                onClick = { onSelectPreset(ThemePreset.LIGHT) },
-                modifier = Modifier.weight(1f),
-            )
-            ModeCard(
-                label = "Dark",
-                selected = selectedPreset == ThemePreset.DARK,
-                previewTop = Color(0xFF071A33),
-                previewSurface = Color(0xFF202020),
-                onClick = { onSelectPreset(ThemePreset.DARK) },
-                modifier = Modifier.weight(1f),
-            )
+        LauncherThemes.all.chunked(2).forEach { rowThemes ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                rowThemes.forEach { preset ->
+                    ModeCard(
+                        label = preset.displayName,
+                        selected = selectedPreset == preset.preset,
+                        previewTop = if (preset.isDark) Color(0xFF071A33) else Color(0xFF9CC7EE),
+                        previewSurface = preset.windowSurface,
+                        previewAccent = preset.accent,
+                        onClick = { onSelectPreset(preset.preset) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (rowThemes.size == 1) Spacer(Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(10.dp))
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(6.dp))
         Text("Accent color", color = theme.textSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -260,7 +263,7 @@ private fun PersonalizationPage(
                     .border(2.dp, theme.text.copy(alpha = 0.4f), CircleShape),
             )
             Spacer(Modifier.width(10.dp))
-            Text("Blue (default)", color = theme.text, fontSize = 12.sp)
+            Text("Set by the theme", color = theme.text, fontSize = 12.sp)
         }
     }
 }
@@ -271,6 +274,7 @@ private fun ModeCard(
     selected: Boolean,
     previewTop: Color,
     previewSurface: Color,
+    previewAccent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -285,7 +289,7 @@ private fun ModeCard(
             )
             .clickable { onClick() },
     ) {
-        // Mini desktop preview
+        // Mini desktop preview: wallpaper + window + accent chip
         Box(
             Modifier.fillMaxWidth().height(64.dp)
                 .background(Brush.verticalGradient(listOf(previewTop, previewTop.copy(alpha = 0.7f)))),
@@ -296,7 +300,15 @@ private fun ModeCard(
                     .size(width = 44.dp, height = 26.dp)
                     .clip(RoundedCornerShape(3.dp))
                     .background(previewSurface),
-            )
+            ) {
+                Box(
+                    Modifier.align(Alignment.BottomStart)
+                        .padding(3.dp)
+                        .size(width = 14.dp, height = 5.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(previewAccent),
+                )
+            }
         }
         Row(
             Modifier.fillMaxWidth().background(theme.card).padding(horizontal = 10.dp, vertical = 7.dp),

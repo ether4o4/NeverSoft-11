@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AudioFile
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ContentCut
@@ -52,9 +53,9 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.outlined.VideoFile
 import androidx.compose.material.icons.outlined.VideoLibrary
-import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -88,7 +89,9 @@ import java.util.Locale
 private data class Clipboard(val source: File, val isCut: Boolean)
 
 // Windows 11 File Explorer: command bar, breadcrumb address bar,
-// navigation sidebar, details list, working file operations.
+// navigation sidebar, details list, working file operations. The
+// Recycle Bin is a virtual view aggregating the shell's own bin and
+// Android's system trash, with Restore support.
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File Explorer") {
@@ -105,11 +108,16 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
 
     val inTrash = Trash.isTrash(currentDir)
 
-    // null means the directory could not be read (missing permission or unreadable path)
+    // Regular directory listing (null = unreadable)
     val listing: List<File>? = remember(currentDir, refreshTick) {
-        currentDir.listFiles()
+        if (inTrash) emptyList()
+        else currentDir.listFiles()
             ?.filter { !(it.name.startsWith(".") && it.parentFile?.absolutePath == home.absolutePath) }
             ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+    }
+    // Recycle Bin listing (own bin + Android system trash)
+    val binEntries: List<Trash.TrashEntry> = remember(currentDir, refreshTick) {
+        if (inTrash) Trash.listEntries() else emptyList()
     }
 
     fun navigate(dir: File) {
@@ -126,7 +134,8 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
         }
     }
 
-    val selectedFile = selectedPath?.let { File(it) }?.takeIf { it.exists() }
+    val selectedFile = if (inTrash) null else selectedPath?.let { File(it) }?.takeIf { it.exists() }
+    val selectedEntry = if (inTrash) binEntries.firstOrNull { it.file.absolutePath == selectedPath } else null
 
     Column(Modifier.fillMaxSize()) {
         // ————— Command bar —————
@@ -134,71 +143,107 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
             Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .clickable {
-                        val target = Trash.uniqueName(currentDir, "New folder")
-                        if (target.mkdirs()) refreshTick++
-                    }
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Outlined.Add, null, Modifier.size(16.dp), tint = theme.accent)
-                Spacer(Modifier.width(6.dp))
-                Text("New", color = theme.text, fontSize = 13.sp)
-            }
-            Box(Modifier.padding(horizontal = 8.dp).size(1.dp, 22.dp).background(theme.divider))
-
-            CommandIcon(Icons.Outlined.ContentCut, "Cut", enabled = selectedFile != null) {
-                selectedFile?.let { clipboard = Clipboard(it, isCut = true) }
-            }
-            CommandIcon(Icons.Outlined.ContentCopy, "Copy", enabled = selectedFile != null) {
-                selectedFile?.let { clipboard = Clipboard(it, isCut = false) }
-            }
-            CommandIcon(Icons.Outlined.ContentPaste, "Paste", enabled = clipboard != null) {
-                clipboard?.let { clip ->
-                    val target = Trash.uniqueName(currentDir, clip.source.name)
-                    val ok = runCatching {
-                        if (clip.isCut) {
-                            clip.source.renameTo(target) ||
-                                (clip.source.copyRecursively(target) && clip.source.deleteRecursively())
-                        } else {
-                            clip.source.copyRecursively(target)
-                        }
-                    }.getOrDefault(false)
-                    if (ok) {
-                        if (clip.isCut) clipboard = null
-                        refreshTick++
-                    }
-                }
-            }
-            CommandIcon(Icons.Outlined.DriveFileRenameOutline, "Rename", enabled = selectedFile != null) {
-                renameTarget = selectedFile
-            }
-            CommandIcon(Icons.Outlined.Delete, "Delete", enabled = selectedFile != null) {
-                selectedFile?.let { file ->
-                    val ok = if (inTrash) file.deleteRecursively() else Trash.moveToTrash(file)
-                    if (ok) {
-                        selectedPath = null
-                        refreshTick++
-                    }
-                }
-            }
-
-            Spacer(Modifier.weight(1f))
-            if (inTrash && listing?.isNotEmpty() == true) {
-                Text(
-                    "Empty Recycle Bin",
-                    color = theme.accent, fontSize = 12.sp,
-                    modifier = Modifier
+            if (inTrash) {
+                Row(
+                    Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .clickable {
-                            listing.forEach { it.deleteRecursively() }
+                        .clickable(enabled = selectedEntry != null) {
+                            selectedEntry?.let { entry ->
+                                if (Trash.restore(entry)) {
+                                    selectedPath = null
+                                    refreshTick++
+                                }
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.RestoreFromTrash, null, Modifier.size(16.dp),
+                        tint = if (selectedEntry != null) theme.accent else theme.textDisabled,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Restore",
+                        color = if (selectedEntry != null) theme.text else theme.textDisabled,
+                        fontSize = 13.sp,
+                    )
+                }
+                CommandIcon(Icons.Outlined.Delete, "Delete permanently", enabled = selectedEntry != null) {
+                    selectedEntry?.let { entry ->
+                        if (Trash.deletePermanently(entry)) {
+                            selectedPath = null
                             refreshTick++
                         }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                )
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                if (binEntries.isNotEmpty()) {
+                    Text(
+                        "Empty Recycle Bin",
+                        color = theme.accent, fontSize = 12.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable {
+                                Trash.empty()
+                                selectedPath = null
+                                refreshTick++
+                            }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                }
+            } else {
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable {
+                            val target = Trash.uniqueName(currentDir, "New folder")
+                            if (target.mkdirs()) refreshTick++
+                        }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.Add, null, Modifier.size(16.dp), tint = theme.accent)
+                    Spacer(Modifier.width(6.dp))
+                    Text("New", color = theme.text, fontSize = 13.sp)
+                }
+                Box(Modifier.padding(horizontal = 8.dp).size(1.dp, 22.dp).background(theme.divider))
+
+                CommandIcon(Icons.Outlined.ContentCut, "Cut", enabled = selectedFile != null) {
+                    selectedFile?.let { clipboard = Clipboard(it, isCut = true) }
+                }
+                CommandIcon(Icons.Outlined.ContentCopy, "Copy", enabled = selectedFile != null) {
+                    selectedFile?.let { clipboard = Clipboard(it, isCut = false) }
+                }
+                CommandIcon(Icons.Outlined.ContentPaste, "Paste", enabled = clipboard != null) {
+                    clipboard?.let { clip ->
+                        val target = Trash.uniqueName(currentDir, clip.source.name)
+                        val ok = runCatching {
+                            if (clip.isCut) {
+                                clip.source.renameTo(target) ||
+                                    (clip.source.copyRecursively(target) && clip.source.deleteRecursively())
+                            } else {
+                                clip.source.copyRecursively(target)
+                            }
+                        }.getOrDefault(false)
+                        if (ok) {
+                            if (clip.isCut) clipboard = null
+                            refreshTick++
+                        }
+                    }
+                }
+                CommandIcon(Icons.Outlined.DriveFileRenameOutline, "Rename", enabled = selectedFile != null) {
+                    renameTarget = selectedFile
+                }
+                CommandIcon(Icons.Outlined.Delete, "Delete", enabled = selectedFile != null) {
+                    selectedFile?.let { file ->
+                        if (Trash.moveToTrash(file)) {
+                            selectedPath = null
+                            refreshTick++
+                        }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(theme.divider))
@@ -211,12 +256,11 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
             CommandIcon(Icons.Outlined.ArrowBack, "Back", enabled = backStack.isNotEmpty()) { goBack() }
             CommandIcon(
                 Icons.Outlined.ArrowUpward, "Up",
-                enabled = currentDir.parentFile != null && currentDir.absolutePath != "/",
+                enabled = !inTrash && currentDir.parentFile != null && currentDir.absolutePath != "/",
             ) {
                 currentDir.parentFile?.let { navigate(it) }
             }
             Spacer(Modifier.width(4.dp))
-            // Breadcrumbs
             Row(
                 Modifier
                     .weight(1f)
@@ -228,7 +272,7 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                breadcrumbsFor(currentDir, home, windowTitle).forEachIndexed { index, (label, dir) ->
+                breadcrumbsFor(currentDir, home).forEachIndexed { index, (label, dir) ->
                     if (index > 0) {
                         Icon(Icons.Outlined.ChevronRight, null, Modifier.size(14.dp), tint = theme.textSecondary)
                     }
@@ -284,83 +328,95 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
             Box(Modifier.width(1.dp).fillMaxHeight().background(theme.divider))
 
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                // Column headers
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("Name", color = theme.textSecondary, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                    Text("Modified", color = theme.textSecondary, fontSize = 11.sp, modifier = Modifier.width(70.dp))
+                    Text(
+                        if (inTrash) "Deleted" else "Modified",
+                        color = theme.textSecondary, fontSize = 11.sp, modifier = Modifier.width(70.dp),
+                    )
                     Text("Size", color = theme.textSecondary, fontSize = 11.sp, modifier = Modifier.width(58.dp))
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(theme.divider))
 
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     when {
-                        listing == null -> PermissionEmptyState()
-                        listing.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                if (inTrash) "Recycle Bin is empty" else "This folder is empty",
-                                color = theme.textSecondary, fontSize = 12.sp,
-                            )
+                        inTrash -> if (binEntries.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Recycle Bin is empty", color = theme.textSecondary, fontSize = 12.sp)
+                            }
+                        } else {
+                            LazyColumn(Modifier.fillMaxSize()) {
+                                items(binEntries, key = { it.file.absolutePath }) { entry ->
+                                    val isSelected = entry.file.absolutePath == selectedPath
+                                    FileListRow(
+                                        icon = if (entry.file.isDirectory) Icons.Filled.Folder
+                                        else fileIcon(entry.displayName),
+                                        iconTint = if (entry.file.isDirectory) Color(0xFFFFCA28)
+                                        else theme.textSecondary,
+                                        name = entry.displayName,
+                                        subtitleUnder = entry.originalPath?.let { orig ->
+                                            File(orig).parent?.removePrefix(home.absolutePath)
+                                                ?.trim('/')?.ifEmpty { "Home" }
+                                        },
+                                        date = entry.file.lastModified(),
+                                        sizeText = if (entry.file.isDirectory) ""
+                                        else formatSize(entry.file.length()),
+                                        isSelected = isSelected,
+                                        onClick = {
+                                            selectedPath =
+                                                if (isSelected) null else entry.file.absolutePath
+                                        },
+                                        onLongClick = {
+                                            selectedPath =
+                                                if (isSelected) null else entry.file.absolutePath
+                                        },
+                                    )
+                                }
+                            }
                         }
+
+                        listing == null -> PermissionEmptyState()
+
+                        listing.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("This folder is empty", color = theme.textSecondary, fontSize = 12.sp)
+                        }
+
                         else -> LazyColumn(Modifier.fillMaxSize()) {
                             items(listing, key = { it.absolutePath }) { file ->
                                 val isSelected = file.absolutePath == selectedPath
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .background(if (isSelected) theme.accent.copy(alpha = 0.18f) else Color.Transparent)
-                                        .combinedClickable(
-                                            onClick = {
-                                                if (file.isDirectory) navigate(file)
-                                                else FileOpener.open(context, file)
-                                            },
-                                            onLongClick = {
-                                                selectedPath =
-                                                    if (isSelected) null else file.absolutePath
-                                            },
-                                        )
-                                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        if (file.isDirectory) Icons.Filled.Folder else fileIcon(file.name),
-                                        contentDescription = null,
-                                        tint = if (file.isDirectory) Color(0xFFFFCA28) else theme.textSecondary,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Spacer(Modifier.width(9.dp))
-                                    Text(
-                                        file.name, fontSize = 12.sp, color = theme.text, maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-                                    )
-                                    Text(
-                                        SimpleDateFormat("M/d/yy", Locale.getDefault())
-                                            .format(Date(file.lastModified())),
-                                        fontSize = 10.sp, color = theme.textSecondary,
-                                        modifier = Modifier.width(70.dp),
-                                    )
-                                    Text(
-                                        if (file.isDirectory) "" else formatSize(file.length()),
-                                        fontSize = 10.sp, color = theme.textSecondary,
-                                        modifier = Modifier.width(58.dp),
-                                    )
-                                }
+                                FileListRow(
+                                    icon = if (file.isDirectory) Icons.Filled.Folder else fileIcon(file.name),
+                                    iconTint = if (file.isDirectory) Color(0xFFFFCA28) else theme.textSecondary,
+                                    name = file.name,
+                                    subtitleUnder = null,
+                                    date = file.lastModified(),
+                                    sizeText = if (file.isDirectory) "" else formatSize(file.length()),
+                                    isSelected = isSelected,
+                                    onClick = {
+                                        if (file.isDirectory) navigate(file)
+                                        else FileOpener.open(context, file)
+                                    },
+                                    onLongClick = {
+                                        selectedPath = if (isSelected) null else file.absolutePath
+                                    },
+                                )
                             }
                         }
                     }
                 }
 
-                // Status bar
                 Box(Modifier.fillMaxWidth().height(1.dp).background(theme.divider))
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val count = if (inTrash) binEntries.size else listing?.size ?: 0
                     Text(
-                        "${listing?.size ?: 0} items" +
-                            (if (selectedFile != null) "   |   1 item selected" else ""),
+                        "$count items" +
+                            (if (selectedPath != null) "   |   1 item selected" else ""),
                         color = theme.textSecondary, fontSize = 11.sp,
                     )
                 }
@@ -414,6 +470,51 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FileListRow(
+    icon: ImageVector,
+    iconTint: Color,
+    name: String,
+    subtitleUnder: String?,
+    date: Long,
+    sizeText: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(if (isSelected) theme.accent.copy(alpha = 0.18f) else Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(18.dp), tint = iconTint)
+        Spacer(Modifier.width(9.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                name, fontSize = 12.sp, color = theme.text, maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitleUnder != null) {
+                Text(
+                    subtitleUnder, fontSize = 10.sp, color = theme.textSecondary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(
+            SimpleDateFormat("M/d/yy", Locale.getDefault()).format(Date(date)),
+            fontSize = 10.sp, color = theme.textSecondary,
+            modifier = Modifier.width(70.dp),
+        )
+        Text(sizeText, fontSize = 10.sp, color = theme.textSecondary, modifier = Modifier.width(58.dp))
     }
 }
 
@@ -492,11 +593,7 @@ private fun PermissionEmptyState() {
 }
 
 // Breadcrumb segments: label + navigable dir (null = not navigable)
-private fun breadcrumbsFor(
-    currentDir: File,
-    home: File,
-    windowTitle: String,
-): List<Pair<String, File?>> {
+private fun breadcrumbsFor(currentDir: File, home: File): List<Pair<String, File?>> {
     val homePath = home.absolutePath
     val path = currentDir.absolutePath
     return when {

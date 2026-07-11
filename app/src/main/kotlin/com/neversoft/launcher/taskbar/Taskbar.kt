@@ -5,28 +5,27 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material.icons.outlined.Wifi
-import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,20 +50,23 @@ import androidx.compose.ui.unit.sp
 import com.neversoft.launcher.theme.LocalLauncherTheme
 import com.neversoft.launcher.ui.StartLogo
 import com.neversoft.launcher.window.ShellWindow
+import com.neversoft.launcher.window.WindowContentType
 import com.neversoft.launcher.window.WindowState
 import com.neversoft.launcher.window.toIcon
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Windows 11 taskbar: centered Start/Search/Task View + running apps,
-// system tray with network/volume/battery, two-line clock, show-desktop sliver.
+const val TASKBAR_HEIGHT_DP = 48
+
+// Windows 11 taskbar. The app cluster centers itself in the space left of
+// the tray so the two can never overlap, and the bar extends behind the
+// Android gesture area so nothing collides with the nav pill.
 @Composable
 fun Taskbar(
     onStartClick: () -> Unit,
     onSearchClick: () -> Unit,
     onTaskViewClick: () -> Unit,
-    onExplorerClick: () -> Unit,
     openWindows: List<ShellWindow>,
     focusedWindowId: String?,
     onWindowTaskbarClick: (String) -> Unit,
@@ -90,89 +92,80 @@ fun Taskbar(
         }
     }
 
-    Column(modifier) {
+    Column(modifier.background(theme.taskbar)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(theme.stroke))
-        Box(Modifier.fillMaxWidth().weight(1f).background(theme.taskbar)) {
-            // Centered cluster
-            Row(
-                Modifier.align(Alignment.Center).fillMaxHeight(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                TaskbarButton(onClick = onStartClick, contentDescription = "Start") {
-                    StartLogo(22.dp)
-                }
-                TaskbarButton(onClick = onSearchClick, contentDescription = "Search") {
-                    Icon(Icons.Outlined.Search, "Search", Modifier.size(22.dp), tint = theme.text)
-                }
-                TaskbarButton(onClick = onTaskViewClick, contentDescription = "Task view") {
-                    TaskViewGlyph(theme.text)
-                }
-                TaskbarButton(
-                    onClick = onExplorerClick,
-                    contentDescription = "File Explorer",
-                    indicator = if (openWindows.any { it.title == "File Explorer" }) {
-                        if (openWindows.firstOrNull { it.id == focusedWindowId }?.title == "File Explorer")
-                            TaskbarIndicator.FOCUSED else TaskbarIndicator.RUNNING
-                    } else TaskbarIndicator.NONE,
+        Row(
+            Modifier.fillMaxWidth().height(TASKBAR_HEIGHT_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // App cluster, centered in the space before the tray
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                Row(
+                    Modifier.align(Alignment.Center),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Icon(Icons.Filled.Folder, "File Explorer", Modifier.size(22.dp), tint = Color(0xFFFFCA28))
-                }
-                openWindows.filter { it.title != "File Explorer" }.take(6).forEach { win ->
-                    TaskbarButton(
-                        onClick = { onWindowTaskbarClick(win.id) },
-                        contentDescription = win.title,
-                        indicator = if (win.id == focusedWindowId && win.state != WindowState.MINIMIZED)
-                            TaskbarIndicator.FOCUSED else TaskbarIndicator.RUNNING,
-                    ) {
-                        Icon(toIcon(win.contentType), win.title, Modifier.size(21.dp), tint = theme.text)
+                    TaskbarButton(onClick = onStartClick) {
+                        StartLogo(22.dp)
+                    }
+                    TaskbarButton(onClick = onSearchClick) {
+                        Icon(Icons.Outlined.Search, "Search", Modifier.size(22.dp), tint = theme.text)
+                    }
+                    TaskbarButton(onClick = onTaskViewClick) {
+                        TaskViewGlyph(theme.text)
+                    }
+                    openWindows.take(4).forEach { win ->
+                        TaskbarButton(
+                            onClick = { onWindowTaskbarClick(win.id) },
+                            indicator = if (win.id == focusedWindowId && win.state != WindowState.MINIMIZED)
+                                TaskbarIndicator.FOCUSED else TaskbarIndicator.RUNNING,
+                        ) {
+                            Icon(
+                                toIcon(win.contentType), win.title, Modifier.size(21.dp),
+                                tint = if (win.contentType == WindowContentType.FILE_EXPLORER)
+                                    Color(0xFFFFCA28) else theme.text,
+                            )
+                        }
                     }
                 }
             }
 
-            // System tray, right-aligned
+            // System tray
             Row(
-                Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable { onTrayClick() }
+                    .padding(horizontal = 7.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                // Network / volume / battery cluster -> quick settings
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable { onTrayClick() }
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(
-                        if (onWifi) Icons.Outlined.Wifi else Icons.Outlined.SignalCellularAlt,
-                        "Network", Modifier.size(16.dp), tint = theme.text,
-                    )
-                    Icon(Icons.AutoMirrored.Outlined.VolumeUp, "Volume", Modifier.size(16.dp), tint = theme.text)
-                    BatteryGlyph(batteryPct, theme.text)
-                }
-                // Clock -> calendar & notifications
-                Column(
-                    Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable { onClockClick() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    Text(timeText, color = theme.text, fontSize = 12.sp, lineHeight = 15.sp, textAlign = TextAlign.End)
-                    Text(dateText, color = theme.text, fontSize = 12.sp, lineHeight = 15.sp, textAlign = TextAlign.End)
-                }
-                // Show desktop sliver
+                Icon(
+                    if (onWifi) Icons.Outlined.Wifi else Icons.Outlined.SignalCellularAlt,
+                    "Network", Modifier.size(15.dp), tint = theme.text,
+                )
+                Icon(Icons.AutoMirrored.Outlined.VolumeUp, "Volume", Modifier.size(15.dp), tint = theme.text)
+                BatteryGlyph(batteryPct, theme.text)
+            }
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable { onClockClick() }
+                    .padding(horizontal = 7.dp, vertical = 5.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                Text(timeText, color = theme.text, fontSize = 12.sp, lineHeight = 15.sp, textAlign = TextAlign.End)
+                Text(dateText, color = theme.text, fontSize = 12.sp, lineHeight = 15.sp, textAlign = TextAlign.End)
+            }
+            // Show desktop sliver
+            Box(Modifier.fillMaxHeight().width(10.dp).clickable { onShowDesktop() }) {
                 Box(
-                    Modifier.fillMaxHeight().width(10.dp).clickable { onShowDesktop() },
-                ) {
-                    Box(
-                        Modifier.align(Alignment.CenterStart).fillMaxHeight()
-                            .padding(vertical = 12.dp).width(1.dp).background(theme.divider),
-                    )
-                }
+                    Modifier.align(Alignment.CenterStart).fillMaxHeight()
+                        .padding(vertical = 12.dp).width(1.dp).background(theme.divider),
+                )
             }
         }
+        // Extend the bar's background behind the gesture-nav area
+        Box(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars))
     }
 }
 
@@ -181,7 +174,6 @@ enum class TaskbarIndicator { NONE, RUNNING, FOCUSED }
 @Composable
 private fun TaskbarButton(
     onClick: () -> Unit,
-    contentDescription: String,
     indicator: TaskbarIndicator = TaskbarIndicator.NONE,
     content: @Composable () -> Unit,
 ) {
@@ -246,14 +238,12 @@ private fun BatteryGlyph(percent: Int, tint: Color) {
             cornerRadius = corner,
             style = Stroke(width = size.height * 0.12f),
         )
-        // Cap
         drawRoundRect(
             color = tint,
             topLeft = Offset(bodyW + capW * 0.4f, size.height * 0.3f),
             size = Size(capW, size.height * 0.4f),
             cornerRadius = CornerRadius(capW * 0.5f),
         )
-        // Fill
         val pad = size.height * 0.22f
         drawRoundRect(
             color = tint,

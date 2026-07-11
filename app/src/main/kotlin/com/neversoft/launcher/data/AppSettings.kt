@@ -16,6 +16,7 @@ object AppSettings {
     val KEY_LAUNCHER_START_PINS       = stringPreferencesKey("launcher_start_pins")
     val KEY_FIRST_RUN                 = booleanPreferencesKey("first_run")
     val KEY_DESKTOP_ICON_POSITIONS    = stringPreferencesKey("desktop_icon_positions")
+    val KEY_START_PINS_SEEDED         = booleanPreferencesKey("start_pins_seeded")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -25,6 +26,12 @@ object AppSettings {
 
     fun startPinsFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_START_PINS] ?: "[]" }
+
+    fun startPinsSeededFlow(context: Context): Flow<Boolean> =
+        context.dataStore.data.map { it[KEY_START_PINS_SEEDED] ?: false }
+
+    suspend fun setStartPinsSeeded(context: Context) =
+        context.dataStore.edit { it[KEY_START_PINS_SEEDED] = true }
 
     fun isFirstRunFlow(context: Context): Flow<Boolean> =
         context.dataStore.data.map { it[KEY_FIRST_RUN] ?: true }

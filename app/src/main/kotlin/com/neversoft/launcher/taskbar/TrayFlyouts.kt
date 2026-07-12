@@ -10,12 +10,15 @@ import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -226,32 +229,41 @@ private fun QuickToggle(
 }
 
 // ————— Notification center + calendar (clock flyout) —————
+// Anchored bottom-right; its top-left corner drags to resize.
 @Composable
-fun CalendarFlyout(modifier: Modifier = Modifier) {
+fun CalendarFlyout(
+    onResizeDelta: (androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp) -> Unit = { _, _ -> },
+    onResizeEnd: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val theme = LocalLauncherTheme.current
     var monthOffset by remember { mutableStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
 
-    Column(
-        modifier
-            .width(348.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(theme.menuSurface)
-            .border(1.dp, theme.stroke, RoundedCornerShape(8.dp)),
-    ) {
-        // Notifications
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+    Box(modifier) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(8.dp))
+                .background(theme.menuSurface)
+                .border(1.dp, theme.stroke, RoundedCornerShape(8.dp)),
+        ) {
+        // Notifications — grows with the panel
+        Column(
+            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Notifications", color = theme.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
                 Text("Clear all", color = theme.accent, fontSize = 12.sp)
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.weight(1f))
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Outlined.Notifications, null, Modifier.size(26.dp), tint = theme.textDisabled)
                 Spacer(Modifier.height(6.dp))
                 Text("No new notifications", color = theme.textSecondary, fontSize = 13.sp)
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.weight(1f))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(theme.divider))
 
@@ -322,6 +334,42 @@ fun CalendarFlyout(modifier: Modifier = Modifier) {
                         day++
                     }
                 }
+            }
+        }
+        }
+
+        // Resize grip: panel is anchored bottom-right, so the top-left
+        // corner drags to resize width and height
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .size(32.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDrag = { change, drag ->
+                            change.consume()
+                            with(density) { onResizeDelta(drag.x.toDp(), drag.y.toDp()) }
+                        },
+                        onDragEnd = { onResizeEnd() },
+                    )
+                },
+        ) {
+            androidx.compose.foundation.Canvas(
+                Modifier.align(Alignment.TopStart).padding(top = 7.dp, start = 7.dp).size(11.dp),
+            ) {
+                val stroke = 1.4.dp.toPx()
+                drawLine(
+                    theme.textSecondary,
+                    androidx.compose.ui.geometry.Offset(0f, 0f),
+                    androidx.compose.ui.geometry.Offset(size.width, 0f),
+                    stroke,
+                )
+                drawLine(
+                    theme.textSecondary,
+                    androidx.compose.ui.geometry.Offset(0f, 0f),
+                    androidx.compose.ui.geometry.Offset(0f, size.height),
+                    stroke,
+                )
             }
         }
     }

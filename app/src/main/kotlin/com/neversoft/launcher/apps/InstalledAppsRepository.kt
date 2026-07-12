@@ -19,28 +19,51 @@ data class InstalledApp(
 
 object InstalledAppsRepository {
 
+    // Process-wide cache: the app list is served instantly after the first
+    // load (the shell warms it at startup). Icons are memoized separately so
+    // a refresh only decodes icons for apps it hasn't seen.
+    @Volatile private var cachedApps: List<InstalledApp>? = null
+    @Volatile private var cachedPack: String? = null
+    @Volatile private var cachedAt: Long = 0
+    private val iconMemo = HashMap<String, ImageBitmap?>()
+    private const val CACHE_TTL_MS = 30_000L
+
     suspend fun loadApps(context: Context): List<InstalledApp> = withContext(Dispatchers.IO) {
-        val pm = context.packageManager
         val iconPack = AppSettings.iconPackFlow(context).first()
+        cachedApps?.let { cached ->
+            if (cachedPack == iconPack && System.currentTimeMillis() - cachedAt < CACHE_TTL_MS) {
+                return@withContext cached
+            }
+        }
+        val pm = context.packageManager
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        pm.queryIntentActivities(launcherIntent, 0)
+        val apps = pm.queryIntentActivities(launcherIntent, 0)
             .filter { it.activityInfo.packageName != context.packageName }
             .map { resolveInfo ->
+                val pkg = resolveInfo.activityInfo.packageName
+                val activity = resolveInfo.activityInfo.name
+                val memoKey = "$iconPack|$pkg|$activity"
+                val icon = synchronized(iconMemo) { iconMemo[memoKey] } ?: runCatching {
+                    IconPacks.getIcon(context, iconPack, pkg, activity)?.asImageBitmap()
+                        ?: resolveInfo.loadIcon(pm).toBitmap(ICON_SIZE_PX, ICON_SIZE_PX).asImageBitmap()
+                }.getOrNull().also { loaded ->
+                    synchronized(iconMemo) {
+                        if (iconMemo.size > 600) iconMemo.clear()
+                        iconMemo[memoKey] = loaded
+                    }
+                }
                 InstalledApp(
                     label = resolveInfo.loadLabel(pm).toString(),
-                    packageName = resolveInfo.activityInfo.packageName,
-                    icon = runCatching {
-                        IconPacks.getIcon(
-                            context, iconPack,
-                            resolveInfo.activityInfo.packageName,
-                            resolveInfo.activityInfo.name,
-                        )?.asImageBitmap()
-                            ?: resolveInfo.loadIcon(pm).toBitmap(ICON_SIZE_PX, ICON_SIZE_PX).asImageBitmap()
-                    }.getOrNull(),
+                    packageName = pkg,
+                    icon = icon,
                 )
             }
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }
+        cachedApps = apps
+        cachedPack = iconPack
+        cachedAt = System.currentTimeMillis()
+        apps
     }
 
     // Icon for a single package, honoring the active icon pack
@@ -60,5 +83,5 @@ object InstalledAppsRepository {
         runCatching { context.startActivity(intent) }
     }
 
-    private const val ICON_SIZE_PX = 96
+    private const val ICON_SIZE_PX = 128
 }

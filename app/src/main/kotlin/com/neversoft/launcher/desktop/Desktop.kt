@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.OpenInNew
@@ -72,6 +73,8 @@ import com.neversoft.launcher.apps.InstalledApp
 import com.neversoft.launcher.apps.InstalledAppsRepository
 import com.neversoft.launcher.data.AppSettings
 import com.neversoft.launcher.files.Trash
+import com.neversoft.launcher.ui.AccentButton
+import com.neversoft.launcher.ui.SubtleButton
 import com.neversoft.launcher.theme.LocalLauncherTheme
 import com.neversoft.launcher.window.WindowContentType
 import kotlinx.coroutines.flow.first
@@ -130,6 +133,7 @@ fun Desktop(
     var desktopMenuAt by remember { mutableStateOf<Offset?>(null) }
     var appPickerOpen by remember { mutableStateOf(false) }
     var pickerApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
+    var renameTarget by remember { mutableStateOf<DeskItem?>(null) }
 
     fun persistItems(newItems: List<DeskItem>) {
         items = newItems
@@ -221,15 +225,30 @@ fun Desktop(
         val desktopDir = File(Environment.getExternalStorageDirectory(), "Desktop").apply { mkdirs() }
         val dir = Trash.uniqueName(desktopDir, "New folder")
         if (dir.mkdirs()) {
-            persistItems(
-                items + DeskItem(
-                    id = "folder_${System.currentTimeMillis()}",
-                    kind = "folder",
-                    label = dir.name,
-                    path = dir.absolutePath,
-                ),
+            val item = DeskItem(
+                id = "folder_${System.currentTimeMillis()}",
+                kind = "folder",
+                label = dir.name,
+                path = dir.absolutePath,
             )
+            persistItems(items + item)
+            // Prompt for a name right away, like Windows' inline rename
+            renameTarget = item
         }
+    }
+
+    fun applyRename(item: DeskItem, rawName: String) {
+        val newName = rawName.trim()
+        if (newName.isEmpty() || newName == item.label) return
+        val updated = if (item.kind == "folder" && item.path != null) {
+            val dir = File(item.path)
+            val dest = File(dir.parentFile, newName)
+            if (dest.exists() || !dir.renameTo(dest)) return
+            item.copy(label = newName, path = dest.absolutePath)
+        } else {
+            item.copy(label = newName)
+        }
+        persistItems(items.map { if (it.id == item.id) updated else it })
     }
 
     Box(
@@ -273,6 +292,7 @@ fun Desktop(
                             },
                         onOpen = { activate(item) },
                         onRemove = { persistItems(items - item) },
+                        onRename = { renameTarget = item },
                     )
                 }
             }
@@ -301,6 +321,52 @@ fun Desktop(
                         desktopMenuAt = null
                         onOpenWindow(WindowContentType.SETTINGS, "Settings", null)
                     }
+                }
+            }
+        }
+    }
+
+    // Rename dialog for desktop folders and shortcut labels
+    renameTarget?.let { target ->
+        var newName by remember(target.id) { mutableStateOf(target.label) }
+        Dialog(onDismissRequest = { renameTarget = null }) {
+            Column(
+                Modifier
+                    .width(300.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(theme.windowSurface)
+                    .border(1.dp, theme.stroke, RoundedCornerShape(8.dp))
+                    .padding(20.dp),
+            ) {
+                Text(
+                    if (target.kind == "folder") "Name this folder" else "Rename shortcut",
+                    color = theme.text, fontSize = 16.sp,
+                )
+                Spacer(Modifier.height(14.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(theme.inputField)
+                        .border(1.dp, theme.stroke, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                ) {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(color = theme.text, fontSize = 13.sp),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.accent),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    AccentButton("OK", modifier = Modifier.weight(1f), onClick = {
+                        applyRename(target, newName)
+                        renameTarget = null
+                    })
+                    SubtleButton("Cancel", modifier = Modifier.weight(1f), onClick = { renameTarget = null })
                 }
             }
         }
@@ -370,6 +436,7 @@ private fun DesktopIconWithMenu(
     modifier: Modifier,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
+    onRename: () -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
@@ -432,6 +499,12 @@ private fun DesktopIconWithMenu(
                             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                         )
                     }
+                }
+            }
+            if (item.kind == "folder" || item.kind == "app") {
+                DesktopMenuItem(Icons.Outlined.DriveFileRenameOutline, "Rename") {
+                    menuOpen = false
+                    onRename()
                 }
             }
             DesktopMenuItem(Icons.Outlined.RemoveCircleOutline, "Remove from desktop") {

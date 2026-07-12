@@ -5,6 +5,12 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -13,19 +19,25 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import com.neversoft.launcher.apps.InstalledAppsRepository
+import com.neversoft.launcher.data.AppSettings
 import com.neversoft.launcher.desktop.Desktop
 import com.neversoft.launcher.startmenu.PowerAction
 import com.neversoft.launcher.startmenu.StartMenu
@@ -41,6 +53,8 @@ import com.neversoft.launcher.window.ShellWindowHost
 import com.neversoft.launcher.window.WindowContentType
 import com.neversoft.launcher.window.WindowManagerEngine
 import com.neversoft.launcher.window.WindowState
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 private enum class Flyout { NONE, START, SEARCH, QUICK_SETTINGS, CALENDAR }
 
@@ -49,6 +63,14 @@ private fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+private fun parseSize(raw: String): DpSize? = raw.split(",")
+    .takeIf { it.size == 2 }
+    ?.let { parts ->
+        val w = parts[0].toFloatOrNull() ?: return null
+        val h = parts[1].toFloatOrNull() ?: return null
+        DpSize(w.dp, h.dp)
+    }
 
 @Composable
 fun ShellScreen(
@@ -63,13 +85,40 @@ fun ShellScreen(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val context = LocalContext.current
-        val menuWidth = if (maxWidth < 620.dp) maxWidth - 24.dp else 596.dp
+        val scope = rememberCoroutineScope()
 
-        // Keep shell content clear of the Android status bar and gesture area
+        // Warm the app cache so the Start menu opens instantly
+        LaunchedEffect(Unit) { InstalledAppsRepository.loadApps(context) }
+
         val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val bottomBar = TASKBAR_HEIGHT_DP.dp + 1.dp + navBottom
         val contentPadding = Modifier.fillMaxSize().padding(top = statusTop, bottom = bottomBar)
+
+        // Resizable panel sizes (persisted)
+        val menuMaxW = maxWidth - 24.dp
+        val menuMaxH = maxHeight - bottomBar - statusTop - 16.dp
+        val defaultMenu = DpSize(
+            if (maxWidth < 620.dp) menuMaxW else 596.dp,
+            if (menuMaxH < 620.dp) menuMaxH else 620.dp,
+        )
+        var startMenuSize by remember { mutableStateOf<DpSize?>(null) }
+        var calendarSize by remember { mutableStateOf<DpSize?>(null) }
+        LaunchedEffect(Unit) {
+            startMenuSize = parseSize(AppSettings.startMenuSizeFlow(context).first())
+            calendarSize = parseSize(AppSettings.calendarSizeFlow(context).first())
+        }
+        fun clampMenu(size: DpSize) = DpSize(
+            size.width.coerceIn(320.dp, menuMaxW),
+            size.height.coerceIn(420.dp, menuMaxH),
+        )
+        val effectiveMenu = clampMenu(startMenuSize ?: defaultMenu)
+        val defaultCalendar = DpSize(348.dp, if (menuMaxH < 540.dp) menuMaxH else 540.dp)
+        fun clampCalendar(size: DpSize) = DpSize(
+            size.width.coerceIn(300.dp, menuMaxW),
+            size.height.coerceIn(420.dp, menuMaxH),
+        )
+        val effectiveCalendar = clampCalendar(calendarSize ?: defaultCalendar)
 
         BloomWallpaper(isDark = theme.isDark, modifier = Modifier.fillMaxSize())
 
@@ -85,7 +134,12 @@ fun ShellScreen(
             modifier = contentPadding,
         )
 
-        if (taskViewVisible) {
+        AnimatedVisibility(
+            visible = taskViewVisible,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(120)),
+            modifier = Modifier.fillMaxSize(),
+        ) {
             TaskView(
                 windows = windowEngine.windows,
                 focusedWindowId = windowEngine.focusedWindowId,
@@ -110,7 +164,15 @@ fun ShellScreen(
             )
         }
 
-        if (flyout == Flyout.START || flyout == Flyout.SEARCH) {
+        // Start menu: anchored bottom-left, resized from its top-right corner
+        AnimatedVisibility(
+            visible = flyout == Flyout.START || flyout == Flyout.SEARCH,
+            enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+            exit = fadeOut(tween(110)) + slideOutVertically(tween(110)) { it / 10 },
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 12.dp, bottom = bottomBar + 8.dp),
+        ) {
             StartMenu(
                 onDismiss = { flyout = Flyout.NONE },
                 onOpenFileExplorer = {
@@ -134,26 +196,62 @@ fun ShellScreen(
                     }
                 },
                 searchFocused = flyout == Flyout.SEARCH,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = bottomBar + 8.dp, top = statusTop + 8.dp)
-                    .width(menuWidth),
+                onResizeDelta = { dx: Dp, dy: Dp ->
+                    // Bottom-left anchor: dragging right widens, dragging up grows
+                    startMenuSize = clampMenu(
+                        DpSize(effectiveMenu.width + dx, effectiveMenu.height - dy),
+                    )
+                },
+                onResizeEnd = {
+                    startMenuSize?.let { size ->
+                        scope.launch {
+                            AppSettings.setStartMenuSize(
+                                context, "${size.width.value},${size.height.value}",
+                            )
+                        }
+                    }
+                },
+                modifier = Modifier.size(effectiveMenu),
             )
         }
 
-        if (flyout == Flyout.QUICK_SETTINGS) {
-            QuickSettingsFlyout(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = bottomBar + 8.dp),
-            )
+        AnimatedVisibility(
+            visible = flyout == Flyout.QUICK_SETTINGS,
+            enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+            exit = fadeOut(tween(110)) + slideOutVertically(tween(110)) { it / 10 },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 12.dp, bottom = bottomBar + 8.dp),
+        ) {
+            QuickSettingsFlyout()
         }
 
-        if (flyout == Flyout.CALENDAR) {
+        // Calendar: anchored bottom-right, resized from its top-left corner
+        AnimatedVisibility(
+            visible = flyout == Flyout.CALENDAR,
+            enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+            exit = fadeOut(tween(110)) + slideOutVertically(tween(110)) { it / 10 },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 12.dp, bottom = bottomBar + 8.dp),
+        ) {
             CalendarFlyout(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = bottomBar + 8.dp),
+                onResizeDelta = { dx: Dp, dy: Dp ->
+                    // Bottom-right anchor: dragging left widens, dragging up grows
+                    calendarSize = clampCalendar(
+                        DpSize(effectiveCalendar.width - dx, effectiveCalendar.height - dy),
+                    )
+                },
+                onResizeEnd = {
+                    calendarSize?.let { size ->
+                        scope.launch {
+                            AppSettings.setCalendarSize(
+                                context, "${size.width.value},${size.height.value}",
+                            )
+                        }
+                    }
+                },
+                modifier = Modifier.size(effectiveCalendar),
             )
         }
 

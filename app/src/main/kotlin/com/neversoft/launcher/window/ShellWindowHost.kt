@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -103,6 +104,17 @@ fun ShellWindowCard(
     val corner = if (isMaximized) 0.dp else 8.dp
     val shape = RoundedCornerShape(corner)
 
+    // Win11-style open animation: quick scale + fade in
+    val spawn = androidx.compose.runtime.remember {
+        androidx.compose.animation.core.Animatable(0f)
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        spawn.animateTo(
+            1f,
+            androidx.compose.animation.core.tween(150, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        )
+    }
+
     val frameModifier = if (isMaximized) {
         Modifier.fillMaxSize()
     } else {
@@ -114,6 +126,12 @@ fun ShellWindowCard(
     Box(
         frameModifier
             .zIndex(window.zIndex.toFloat())
+            .graphicsLayer {
+                val s = 0.94f + 0.06f * spawn.value
+                scaleX = s
+                scaleY = s
+                alpha = spawn.value
+            }
             .shadow(if (isMaximized) 0.dp else 18.dp, shape)
             .clip(shape)
             .background(theme.windowSurface)
@@ -211,12 +229,12 @@ fun ShellWindowCard(
             }
         }
 
-        // Resize grip, bottom-right
+        // Resize grip, bottom-right, with a visible Win11-style hatch
         if (!isMaximized) {
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)
-                    .size(26.dp)
+                    .size(28.dp)
                     .pointerInput(window.id) {
                         detectDragGestures(
                             onDragStart = { onFocus() },
@@ -233,7 +251,16 @@ fun ShellWindowCard(
                             },
                         )
                     },
-            )
+            ) {
+                Canvas(
+                    Modifier.align(Alignment.BottomEnd).padding(bottom = 5.dp, end = 5.dp).size(10.dp),
+                ) {
+                    val stroke = 1.2.dp.toPx()
+                    val c = theme.textSecondary.copy(alpha = 0.55f)
+                    drawLine(c, Offset(size.width, 0f), Offset(0f, size.height), stroke)
+                    drawLine(c, Offset(size.width, size.height * 0.5f), Offset(size.width * 0.5f, size.height), stroke)
+                }
+            }
         }
     }
 }

@@ -232,7 +232,8 @@ private fun QuickToggle(
 // Anchored bottom-right; its top-left corner drags to resize.
 @Composable
 fun CalendarFlyout(
-    onResizeDelta: (androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp) -> Unit = { _, _ -> },
+    currentSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize.Unspecified,
+    onResize: (androidx.compose.ui.unit.DpSize) -> Unit = {},
     onResizeEnd: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -338,38 +339,66 @@ fun CalendarFlyout(
         }
         }
 
-        // Resize grip: panel is anchored bottom-right, so the top-left
-        // corner drags to resize width and height
+        // Resize button: panel is anchored bottom-right, so the top-left
+        // corner drags to resize. Baseline captured at drag start, deltas
+        // accumulate locally — can't snap back.
+        val latestSize by androidx.compose.runtime.rememberUpdatedState(currentSize)
+        val latestOnResize by androidx.compose.runtime.rememberUpdatedState(onResize)
+        val latestOnResizeEnd by androidx.compose.runtime.rememberUpdatedState(onResizeEnd)
         Box(
             Modifier
                 .align(Alignment.TopStart)
-                .size(32.dp)
+                .size(40.dp)
                 .pointerInput(Unit) {
+                    var baseW = 0f
+                    var baseH = 0f
+                    var acc = androidx.compose.ui.geometry.Offset.Zero
                     detectDragGestures(
+                        onDragStart = {
+                            baseW = latestSize.width.toPx()
+                            baseH = latestSize.height.toPx()
+                            acc = androidx.compose.ui.geometry.Offset.Zero
+                        },
                         onDrag = { change, drag ->
                             change.consume()
-                            with(density) { onResizeDelta(drag.x.toDp(), drag.y.toDp()) }
+                            acc += drag
+                            latestOnResize(
+                                androidx.compose.ui.unit.DpSize(
+                                    (baseW - acc.x).toDp(),
+                                    (baseH - acc.y).toDp(),
+                                ),
+                            )
                         },
-                        onDragEnd = { onResizeEnd() },
+                        onDragEnd = { latestOnResizeEnd() },
                     )
                 },
         ) {
-            androidx.compose.foundation.Canvas(
-                Modifier.align(Alignment.TopStart).padding(top = 7.dp, start = 7.dp).size(11.dp),
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = 5.dp, start = 5.dp)
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(theme.card.copy(alpha = 0.9f))
+                    .border(1.dp, theme.stroke, RoundedCornerShape(6.dp)),
             ) {
-                val stroke = 1.4.dp.toPx()
-                drawLine(
-                    theme.textSecondary,
-                    androidx.compose.ui.geometry.Offset(0f, 0f),
-                    androidx.compose.ui.geometry.Offset(size.width, 0f),
-                    stroke,
-                )
-                drawLine(
-                    theme.textSecondary,
-                    androidx.compose.ui.geometry.Offset(0f, 0f),
-                    androidx.compose.ui.geometry.Offset(0f, size.height),
-                    stroke,
-                )
+                androidx.compose.foundation.Canvas(
+                    Modifier.align(Alignment.Center).size(11.dp),
+                ) {
+                    val stroke = 1.4.dp.toPx()
+                    drawLine(
+                        theme.textSecondary,
+                        androidx.compose.ui.geometry.Offset(0f, 0f),
+                        androidx.compose.ui.geometry.Offset(size.width, 0f),
+                        stroke,
+                    )
+                    drawLine(
+                        theme.textSecondary,
+                        androidx.compose.ui.geometry.Offset(0f, 0f),
+                        androidx.compose.ui.geometry.Offset(0f, size.height),
+                        stroke,
+                    )
+                }
             }
         }
     }

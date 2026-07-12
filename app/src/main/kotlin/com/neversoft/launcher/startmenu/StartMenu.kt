@@ -99,7 +99,8 @@ fun StartMenu(
     onOpenSettings: () -> Unit,
     onPowerAction: (PowerAction) -> Unit,
     searchFocused: Boolean = false,
-    onResizeDelta: (androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp) -> Unit = { _, _ -> },
+    currentSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize.Unspecified,
+    onResize: (androidx.compose.ui.unit.DpSize) -> Unit = {},
     onResizeEnd: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -377,25 +378,51 @@ fun StartMenu(
             }
         }
 
-        // Resize grip: the menu is anchored bottom-left, so its top-right
-        // corner drags to resize width and height
-        val density = androidx.compose.ui.platform.LocalDensity.current
+        // Resize button: the menu is anchored bottom-left, so its top-right
+        // corner drags to resize width and height. A baseline is captured at
+        // drag start and raw deltas accumulate locally, so it can't snap back.
+        val latestSize by androidx.compose.runtime.rememberUpdatedState(currentSize)
+        val latestOnResize by androidx.compose.runtime.rememberUpdatedState(onResize)
+        val latestOnResizeEnd by androidx.compose.runtime.rememberUpdatedState(onResizeEnd)
         Box(
             Modifier
                 .align(Alignment.TopEnd)
-                .size(32.dp)
+                .size(40.dp)
                 .pointerInput(Unit) {
+                    var baseW = 0f
+                    var baseH = 0f
+                    var acc = androidx.compose.ui.geometry.Offset.Zero
                     detectDragGestures(
+                        onDragStart = {
+                            baseW = latestSize.width.toPx()
+                            baseH = latestSize.height.toPx()
+                            acc = androidx.compose.ui.geometry.Offset.Zero
+                        },
                         onDrag = { change, drag ->
                             change.consume()
-                            with(density) { onResizeDelta(drag.x.toDp(), drag.y.toDp()) }
+                            acc += drag
+                            latestOnResize(
+                                androidx.compose.ui.unit.DpSize(
+                                    (baseW + acc.x).toDp(),
+                                    (baseH - acc.y).toDp(),
+                                ),
+                            )
                         },
-                        onDragEnd = { onResizeEnd() },
+                        onDragEnd = { latestOnResizeEnd() },
                     )
                 },
         ) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 5.dp, end = 5.dp)
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(theme.card.copy(alpha = 0.9f))
+                    .border(1.dp, theme.stroke, RoundedCornerShape(6.dp)),
+            ) {
             androidx.compose.foundation.Canvas(
-                Modifier.align(Alignment.TopEnd).padding(top = 7.dp, end = 7.dp).size(11.dp),
+                Modifier.align(Alignment.Center).size(11.dp),
             ) {
                 val stroke = 1.4.dp.toPx()
                 drawLine(
@@ -410,6 +437,7 @@ fun StartMenu(
                     androidx.compose.ui.geometry.Offset(size.width, size.height),
                     stroke,
                 )
+            }
             }
         }
     }

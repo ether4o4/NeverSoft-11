@@ -196,12 +196,8 @@ fun ShellScreen(
                     }
                 },
                 searchFocused = flyout == Flyout.SEARCH,
-                onResizeDelta = { dx: Dp, dy: Dp ->
-                    // Bottom-left anchor: dragging right widens, dragging up grows
-                    startMenuSize = clampMenu(
-                        DpSize(effectiveMenu.width + dx, effectiveMenu.height - dy),
-                    )
-                },
+                currentSize = effectiveMenu,
+                onResize = { newSize -> startMenuSize = clampMenu(newSize) },
                 onResizeEnd = {
                     startMenuSize?.let { size ->
                         scope.launch {
@@ -236,12 +232,8 @@ fun ShellScreen(
                 .padding(end = 12.dp, bottom = bottomBar + 8.dp),
         ) {
             CalendarFlyout(
-                onResizeDelta = { dx: Dp, dy: Dp ->
-                    // Bottom-right anchor: dragging left widens, dragging up grows
-                    calendarSize = clampCalendar(
-                        DpSize(effectiveCalendar.width - dx, effectiveCalendar.height - dy),
-                    )
-                },
+                currentSize = effectiveCalendar,
+                onResize = { newSize -> calendarSize = clampCalendar(newSize) },
                 onResizeEnd = {
                     calendarSize?.let { size ->
                         scope.launch {

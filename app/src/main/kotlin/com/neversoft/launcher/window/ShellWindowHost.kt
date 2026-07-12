@@ -63,16 +63,8 @@ fun ShellWindowHost(
                         selectedPreset = selectedPreset,
                         onSelectPreset = onSelectPreset,
                         onFocus = { engine.reorderToFront(window.id) },
-                        onMove = { delta ->
-                            engine.moveWindow(
-                                window.id,
-                                Offset(
-                                    (window.position.x + delta.x).coerceAtLeast(0f),
-                                    (window.position.y + delta.y).coerceAtLeast(0f),
-                                ),
-                            )
-                        },
-                        onResize = { newSize -> engine.resizeWindow(window.id, newSize) },
+                        onMoveBy = { delta -> engine.moveWindowBy(window.id, delta) },
+                        onResizeBy = { dw, dh -> engine.resizeWindowBy(window.id, dw, dh) },
                         onMinimize = { engine.toggleMinimize(window.id) },
                         onMaximizeRestore = {
                             if (window.state == WindowState.MAXIMIZED) engine.restoreWindow(window.id)
@@ -93,8 +85,8 @@ fun ShellWindowCard(
     selectedPreset: ThemePreset,
     onSelectPreset: (ThemePreset) -> Unit,
     onFocus: () -> Unit,
-    onMove: (Offset) -> Unit,
-    onResize: (DpSize) -> Unit,
+    onMoveBy: (Offset) -> Unit,
+    onResizeBy: (androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp) -> Unit,
     onMinimize: () -> Unit,
     onMaximizeRestore: () -> Unit,
     onClose: () -> Unit,
@@ -138,13 +130,13 @@ fun ShellWindowCard(
             .background(theme.windowSurface)
             .border(1.dp, theme.stroke, shape)
             .pointerInput(Unit) { detectTapGestures { onFocus() } }
-            // Long-press anywhere on the window, then drag to move it
+            // Long-press anywhere on the window body, then drag to move it
             .pointerInput(isMaximized) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { onFocus() },
                     onDrag = { change, drag ->
                         change.consume()
-                        if (!isMaximized) onMove(drag)
+                        if (!isMaximized) onMoveBy(drag)
                     },
                 )
             },
@@ -160,7 +152,7 @@ fun ShellWindowCard(
                             onDragStart = { onFocus() },
                             onDrag = { change, drag ->
                                 change.consume()
-                                if (!isMaximized) onMove(drag)
+                                if (!isMaximized) onMoveBy(drag)
                             },
                         )
                     },
@@ -251,14 +243,9 @@ fun ShellWindowCard(
                             onDragStart = { onFocus() },
                             onDrag = { change, drag ->
                                 change.consume()
-                                with(density) {
-                                    onResize(
-                                        DpSize(
-                                            window.size.width + drag.x.toDp(),
-                                            window.size.height + drag.y.toDp(),
-                                        ),
-                                    )
-                                }
+                                // Report the incremental delta; the engine adds
+                                // it to the window's CURRENT size (no stale snapshot)
+                                onResizeBy(drag.x.toDp(), drag.y.toDp())
                             },
                         )
                     },

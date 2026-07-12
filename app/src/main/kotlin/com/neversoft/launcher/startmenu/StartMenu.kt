@@ -9,6 +9,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -97,6 +99,8 @@ fun StartMenu(
     onOpenSettings: () -> Unit,
     onPowerAction: (PowerAction) -> Unit,
     searchFocused: Boolean = false,
+    onResizeDelta: (androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp) -> Unit = { _, _ -> },
+    onResizeEnd: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val theme = LocalLauncherTheme.current
@@ -199,7 +203,7 @@ fun StartMenu(
         }
         Column(
             Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
                 .clip(RoundedCornerShape(8.dp))
                 .background(theme.menuSurface)
                 .border(1.dp, theme.stroke, RoundedCornerShape(8.dp)),
@@ -250,7 +254,7 @@ fun StartMenu(
                 }
             }
 
-            Box(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Box(Modifier.fillMaxWidth().weight(1f)) {
                 when (view) {
                     StartView.PINNED -> PinnedView(
                         apps = apps, appsLoaded = appsLoaded, columns = columns,
@@ -372,6 +376,42 @@ fun StartMenu(
                 PowerMenuItem(Icons.AutoMirrored.Outlined.Logout, "Sign out") { onPowerAction(PowerAction.SIGN_OUT) }
             }
         }
+
+        // Resize grip: the menu is anchored bottom-left, so its top-right
+        // corner drags to resize width and height
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .size(32.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDrag = { change, drag ->
+                            change.consume()
+                            with(density) { onResizeDelta(drag.x.toDp(), drag.y.toDp()) }
+                        },
+                        onDragEnd = { onResizeEnd() },
+                    )
+                },
+        ) {
+            androidx.compose.foundation.Canvas(
+                Modifier.align(Alignment.TopEnd).padding(top = 7.dp, end = 7.dp).size(11.dp),
+            ) {
+                val stroke = 1.4.dp.toPx()
+                drawLine(
+                    theme.textSecondary,
+                    androidx.compose.ui.geometry.Offset(0f, 0f),
+                    androidx.compose.ui.geometry.Offset(size.width, 0f),
+                    stroke,
+                )
+                drawLine(
+                    theme.textSecondary,
+                    androidx.compose.ui.geometry.Offset(size.width, 0f),
+                    androidx.compose.ui.geometry.Offset(size.width, size.height),
+                    stroke,
+                )
+            }
+        }
     }
 }
 
@@ -437,10 +477,10 @@ private fun PinnedView(
     // app can be added from All apps
     val pinnedApps = pins.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }
 
-    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+    Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
         SectionHeader("Pinned", "All apps", onAllApps)
         Spacer(Modifier.height(10.dp))
-        Box(Modifier.fillMaxWidth().height(252.dp).padding(horizontal = 20.dp)) {
+        Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp)) {
             when {
                 !appsLoaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Loading…", color = theme.textSecondary, fontSize = 12.sp)
@@ -467,7 +507,7 @@ private fun PinnedView(
         Spacer(Modifier.height(12.dp))
         SectionHeader("Recommended", null, null)
         Spacer(Modifier.height(8.dp))
-        Box(Modifier.fillMaxWidth().height(128.dp).padding(horizontal = 20.dp)) {
+        Box(Modifier.fillMaxWidth().height(120.dp).padding(horizontal = 20.dp)) {
             if (recentFiles.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -605,7 +645,7 @@ private fun AllAppsView(
     onToggleDockPin: (String) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
-    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+    Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
         SectionHeader("All apps", "Back", onBack)
         Spacer(Modifier.height(8.dp))
         val grouped = remember(apps) {
@@ -614,7 +654,7 @@ private fun AllAppsView(
                 if (c.isLetter()) c.toString() else "#"
             }.toSortedMap()
         }
-        LazyColumn(Modifier.fillMaxWidth().height(430.dp).padding(horizontal = 20.dp)) {
+        LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp)) {
             grouped.forEach { (letter, letterApps) ->
                 item(key = "header_$letter") {
                     Text(
@@ -690,10 +730,10 @@ private fun SearchResultsView(
     onActivate: (SearchResult) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
-    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+    Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
         SectionHeader(if (query.isBlank()) "Search" else "Best match", null, null)
         Spacer(Modifier.height(8.dp))
-        Box(Modifier.fillMaxWidth().height(430.dp).padding(horizontal = 20.dp)) {
+        Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp)) {
             if (results.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(

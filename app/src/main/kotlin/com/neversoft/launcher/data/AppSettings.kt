@@ -20,6 +20,8 @@ object AppSettings {
     val KEY_DESKTOP_ITEMS             = stringPreferencesKey("desktop_items")
     val KEY_ICON_PACK                 = stringPreferencesKey("icon_pack")
     val KEY_WALLPAPER_FIT             = stringPreferencesKey("wallpaper_fit")
+    val KEY_START_MENU_SIZE           = stringPreferencesKey("start_menu_size")
+    val KEY_CALENDAR_SIZE             = stringPreferencesKey("calendar_size")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -71,6 +73,19 @@ object AppSettings {
 
     suspend fun setWallpaperFit(context: Context, fit: String) =
         context.dataStore.edit { it[KEY_WALLPAPER_FIT] = fit }
+
+    // Persisted panel sizes ("width,height" in dp; "" = default)
+    fun startMenuSizeFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_START_MENU_SIZE] ?: "" }
+
+    suspend fun setStartMenuSize(context: Context, size: String) =
+        context.dataStore.edit { it[KEY_START_MENU_SIZE] = size }
+
+    fun calendarSizeFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_CALENDAR_SIZE] ?: "" }
+
+    suspend fun setCalendarSize(context: Context, size: String) =
+        context.dataStore.edit { it[KEY_CALENDAR_SIZE] = size }
 
     fun isFirstRunFlow(context: Context): Flow<Boolean> =
         context.dataStore.data.map { it[KEY_FIRST_RUN] ?: true }

@@ -18,6 +18,8 @@ object AppSettings {
     val KEY_DESKTOP_ICON_POSITIONS    = stringPreferencesKey("desktop_icon_positions")
     val KEY_START_PINS_SEEDED         = booleanPreferencesKey("start_pins_seeded")
     val KEY_DESKTOP_ITEMS             = stringPreferencesKey("desktop_items")
+    val KEY_ICON_PACK                 = stringPreferencesKey("icon_pack")
+    val KEY_WALLPAPER_FIT             = stringPreferencesKey("wallpaper_fit")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -54,6 +56,21 @@ object AppSettings {
 
     suspend fun setDesktopItems(context: Context, json: String) =
         context.dataStore.edit { it[KEY_DESKTOP_ITEMS] = json }
+
+    // Selected icon pack package ("" = system icons)
+    fun iconPackFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_ICON_PACK] ?: "" }
+
+    suspend fun setIconPack(context: Context, pkg: String) =
+        context.dataStore.edit { it[KEY_ICON_PACK] = pkg }
+
+    // Wallpaper fit: "crop" (fill screen, may trim edges) or "exact"
+    // (scale to exactly the screen size, no cropping)
+    fun wallpaperFitFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_WALLPAPER_FIT] ?: "crop" }
+
+    suspend fun setWallpaperFit(context: Context, fit: String) =
+        context.dataStore.edit { it[KEY_WALLPAPER_FIT] = fit }
 
     fun isFirstRunFlow(context: Context): Flow<Boolean> =
         context.dataStore.data.map { it[KEY_FIRST_RUN] ?: true }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -136,7 +137,17 @@ fun ShellWindowCard(
             .clip(shape)
             .background(theme.windowSurface)
             .border(1.dp, theme.stroke, shape)
-            .pointerInput(Unit) { detectTapGestures { onFocus() } },
+            .pointerInput(Unit) { detectTapGestures { onFocus() } }
+            // Long-press anywhere on the window, then drag to move it
+            .pointerInput(isMaximized) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { onFocus() },
+                    onDrag = { change, drag ->
+                        change.consume()
+                        if (!isMaximized) onMove(drag)
+                    },
+                )
+            },
     ) {
         Column(Modifier.fillMaxSize()) {
             // Title bar
@@ -229,12 +240,12 @@ fun ShellWindowCard(
             }
         }
 
-        // Resize grip, bottom-right, with a visible Win11-style hatch
+        // Resize button, bottom-right: drag it to resize width and height
         if (!isMaximized) {
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)
-                    .size(28.dp)
+                    .size(34.dp)
                     .pointerInput(window.id) {
                         detectDragGestures(
                             onDragStart = { onFocus() },
@@ -252,13 +263,26 @@ fun ShellWindowCard(
                         )
                     },
             ) {
-                Canvas(
-                    Modifier.align(Alignment.BottomEnd).padding(bottom = 5.dp, end = 5.dp).size(10.dp),
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 4.dp, end = 4.dp)
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(theme.card.copy(alpha = 0.9f))
+                        .border(1.dp, theme.stroke, RoundedCornerShape(6.dp)),
                 ) {
-                    val stroke = 1.2.dp.toPx()
-                    val c = theme.textSecondary.copy(alpha = 0.55f)
-                    drawLine(c, Offset(size.width, 0f), Offset(0f, size.height), stroke)
-                    drawLine(c, Offset(size.width, size.height * 0.5f), Offset(size.width * 0.5f, size.height), stroke)
+                    // Double-headed diagonal arrow
+                    Canvas(Modifier.align(Alignment.Center).size(11.dp)) {
+                        val stroke = 1.4.dp.toPx()
+                        val c = theme.textSecondary
+                        val head = size.width * 0.38f
+                        drawLine(c, Offset(size.width * 0.12f, size.height * 0.12f), Offset(size.width * 0.88f, size.height * 0.88f), stroke)
+                        drawLine(c, Offset(size.width * 0.12f, size.height * 0.12f), Offset(size.width * 0.12f + head, size.height * 0.12f), stroke)
+                        drawLine(c, Offset(size.width * 0.12f, size.height * 0.12f), Offset(size.width * 0.12f, size.height * 0.12f + head), stroke)
+                        drawLine(c, Offset(size.width * 0.88f, size.height * 0.88f), Offset(size.width * 0.88f - head, size.height * 0.88f), stroke)
+                        drawLine(c, Offset(size.width * 0.88f, size.height * 0.88f), Offset(size.width * 0.88f, size.height * 0.88f - head), stroke)
+                    }
                 }
             }
         }

@@ -1,20 +1,31 @@
 package com.neversoft.launcher.theme
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import com.neversoft.launcher.data.AppSettings
+import com.neversoft.launcher.files.ImageStore
+import java.io.File
 import kotlin.math.min
 
-// Procedural recreation of the Windows 11 "Bloom" wallpaper: a ribbon
-// flower of soft blue petals over a deep navy backdrop. Dark and light
-// variants follow the OS wallpaper pair.
+// The desktop backdrop. Defaults to a procedural recreation of the
+// Windows 11 "Bloom" wallpaper (dark and light variants); a user-picked
+// photo from Settings > Personalization replaces it everywhere the
+// wallpaper appears (desktop, lock screen, setup).
 object DesktopWallpaper {
     val DarkBase = Color(0xFF04101F)
     val LightBase = Color(0xFF7EB3E4)
@@ -22,6 +33,23 @@ object DesktopWallpaper {
 
 @Composable
 fun BloomWallpaper(isDark: Boolean, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val customPath by AppSettings.wallpaperImageFlow(context).collectAsState(initial = "")
+    val customBitmap = remember(customPath) {
+        customPath.takeIf { it.isNotEmpty() && File(it).exists() }
+            ?.let { ImageStore.decodeSampled(it, 1600)?.asImageBitmap() }
+    }
+
+    if (customBitmap != null) {
+        Image(
+            bitmap = customBitmap,
+            contentDescription = null,
+            modifier = modifier.background(if (isDark) DesktopWallpaper.DarkBase else DesktopWallpaper.LightBase),
+            contentScale = ContentScale.Crop,
+        )
+        return
+    }
+
     val base = if (isDark) DesktopWallpaper.DarkBase else DesktopWallpaper.LightBase
     Canvas(modifier.background(base)) {
         if (isDark) drawDarkBloom() else drawLightBloom()

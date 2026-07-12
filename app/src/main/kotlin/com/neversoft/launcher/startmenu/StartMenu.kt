@@ -77,6 +77,7 @@ import com.neversoft.launcher.search.ResultType
 import com.neversoft.launcher.search.SearchResult
 import com.neversoft.launcher.search.SettingsSearchProvider
 import com.neversoft.launcher.theme.LocalLauncherTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -177,6 +178,25 @@ fun StartMenu(
 
     BoxWithConstraints(modifier) {
         val columns = if (maxWidth >= 480.dp) 6 else 4
+
+        // One-time migration: materialize the default app set as real pins so
+        // every tile is individually removable from then on
+        LaunchedEffect(appsLoaded) {
+            if (!appsLoaded || apps.isEmpty()) return@LaunchedEffect
+            val seeded = com.neversoft.launcher.data.AppSettings.startPinsSeededFlow(context).first()
+            if (!seeded) {
+                val stored = runCatching {
+                    val arr = org.json.JSONArray(
+                        com.neversoft.launcher.data.AppSettings.startPinsFlow(context).first(),
+                    )
+                    List(arr.length()) { arr.getString(it) }
+                }.getOrDefault(emptyList())
+                if (stored.isEmpty()) {
+                    setPins(apps.take(columns * 3).map { it.packageName })
+                }
+                com.neversoft.launcher.data.AppSettings.setStartPinsSeeded(context)
+            }
+        }
         Column(
             Modifier
                 .fillMaxWidth()
@@ -413,10 +433,9 @@ private fun PinnedView(
     onOpenFile: (File) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
-    // Explicit pins in pin order; fall back to the first apps until the user pins their own
-    val pinnedApps = if (pins.isEmpty()) apps.take(columns * 3)
-    else pins.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }
-    val hasCustomPins = pins.isNotEmpty()
+    // The pinned grid IS the pins list — every tile is removable, and any
+    // app can be added from All apps
+    val pinnedApps = pins.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }
 
     Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
         SectionHeader("Pinned", "All apps", onAllApps)
@@ -436,7 +455,6 @@ private fun PinnedView(
                     items(pinnedApps, key = { it.packageName }) { app ->
                         PinnedAppTile(
                             app = app,
-                            canUnpin = hasCustomPins,
                             isDockPinned = dockPins.contains(app.packageName),
                             onClick = { onLaunch(app) },
                             onUnpin = { onUnpin(app.packageName) },
@@ -472,7 +490,6 @@ private fun PinnedView(
 @Composable
 private fun PinnedAppTile(
     app: InstalledApp,
-    canUnpin: Boolean,
     isDockPinned: Boolean,
     onClick: () -> Unit,
     onUnpin: () -> Unit,
@@ -514,11 +531,9 @@ private fun PinnedAppTile(
             shape = RoundedCornerShape(8.dp),
             containerColor = theme.menuSurface,
         ) {
-            if (canUnpin) {
-                ContextMenuItem(Icons.Outlined.PushPin, "Unpin from Start") {
-                    menuOpen = false
-                    onUnpin()
-                }
+            ContextMenuItem(Icons.Outlined.PushPin, "Unpin from Start") {
+                menuOpen = false
+                onUnpin()
             }
             ContextMenuItem(
                 Icons.Outlined.PushPin,

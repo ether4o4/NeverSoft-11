@@ -12,8 +12,8 @@ android {
         applicationId = "com.neversoft.launcher"
         minSdk = 29
         targetSdk = 35
-        versionCode = 6
-        versionName = "2.2.0"
+        versionCode = 8
+        versionName = "2.4.0"
     }
 
     // Keystore comes from the environment (CI injects it from GitHub

@@ -3,6 +3,8 @@ package com.neversoft.launcher.controlpanel
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,9 +37,11 @@ import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,9 +53,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.neversoft.launcher.data.AppSettings
+import com.neversoft.launcher.files.ImageStore
 import com.neversoft.launcher.theme.LauncherThemes
 import com.neversoft.launcher.theme.LocalLauncherTheme
 import com.neversoft.launcher.theme.ThemePreset
+import com.neversoft.launcher.ui.AccentButton
+import com.neversoft.launcher.ui.SubtleButton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 private enum class SettingsPage(val label: String) {
     HOME("Home"), SYSTEM("System"), PERSONALIZATION("Personalization"), APPS("Apps")
@@ -265,6 +275,59 @@ private fun PersonalizationPage(
             Spacer(Modifier.width(10.dp))
             Text("Set by the theme", color = theme.text, fontSize = 12.sp)
         }
+
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val wallpaperSet by AppSettings.wallpaperImageFlow(context).collectAsState(initial = "")
+        val orbSet by AppSettings.orbImageFlow(context).collectAsState(initial = "")
+
+        val wallpaperPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.GetContent(),
+        ) { uri ->
+            uri?.let {
+                scope.launch(Dispatchers.IO) {
+                    ImageStore.importImage(context, it, "wallpaper")?.let { path ->
+                        AppSettings.setWallpaperImage(context, path)
+                    }
+                }
+            }
+        }
+        val orbPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.GetContent(),
+        ) { uri ->
+            uri?.let {
+                scope.launch(Dispatchers.IO) {
+                    ImageStore.importImage(context, it, "orb")?.let { path ->
+                        AppSettings.setOrbImage(context, path)
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text("Wallpaper", color = theme.textSecondary, fontSize = 12.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AccentButton("Choose from Photos", onClick = { wallpaperPicker.launch("image/*") })
+            if (wallpaperSet.isNotEmpty()) {
+                SubtleButton("Reset to Bloom", onClick = {
+                    scope.launch { AppSettings.setWallpaperImage(context, "") }
+                })
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text("Start button", color = theme.textSecondary, fontSize = 12.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AccentButton("Choose from Photos", onClick = { orbPicker.launch("image/*") })
+            if (orbSet.isNotEmpty()) {
+                SubtleButton("Reset to logo", onClick = {
+                    scope.launch { AppSettings.setOrbImage(context, "") }
+                })
+            }
+        }
+        Spacer(Modifier.height(8.dp))
     }
 }
 

@@ -12,12 +12,14 @@ android {
         applicationId = "com.neversoft.launcher"
         minSdk = 29
         targetSdk = 35
-        versionCode = 8
-        versionName = "2.4.0"
+        versionCode = 9
+        versionName = "2.4.1"
     }
 
-    // Keystore comes from the environment (CI injects it from GitHub
-    // Secrets, or generates a throwaway one). Nothing secret in the repo.
+    // A stable signing identity is required so the rolling-release APK can
+    // install over previous versions. Default: the self-signed keystore
+    // committed to the repo (this is a sideload-distributed hobby launcher,
+    // not a Play Store key). GitHub Secrets, when configured, override it.
     val envKeystorePath: String? = System.getenv("NS_KEYSTORE_PATH")
 
     signingConfigs {
@@ -27,6 +29,11 @@ android {
                 storePassword = System.getenv("NS_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("NS_KEY_ALIAS")
                 keyPassword = System.getenv("NS_KEY_PASSWORD")
+            } else {
+                storeFile = rootProject.file("signing/neversoft-release.keystore")
+                storePassword = "neversoft11"
+                keyAlias = "neversoft"
+                keyPassword = "neversoft11"
             }
         }
     }
@@ -39,11 +46,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = if (envKeystorePath != null) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

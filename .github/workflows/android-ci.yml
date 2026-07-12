@@ -94,8 +94,17 @@ jobs:
           gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create latest --repo "$GITHUB_REPOSITORY" \
               --title "NeverSoft 11 — latest build" \
-              --notes "Rolling release. Automatically updated with the release APK from every push to main."
-          gh release upload latest NeverSoft11.apk --repo "$GITHUB_REPOSITORY" --clobber
+              --notes "Rolling release. Automatically updated with the release APK from every push to main." || true
+          # The upload occasionally flakes ("release not found") — retry
+          for attempt in 1 2 3 4; do
+            if gh release upload latest NeverSoft11.apk --repo "$GITHUB_REPOSITORY" --clobber; then
+              exit 0
+            fi
+            echo "Upload attempt $attempt failed; retrying in 15s"
+            sleep 15
+          done
+          echo "::error::Failed to publish rolling release after 4 attempts"
+          exit 1
 
       - name: Upload reports
         if: always()

@@ -106,11 +106,14 @@ fun Taskbar(
         }
     }
 
-    // Custom Start button image (falls back to the four-pane logo)
+    // Custom Start button image (falls back to the four-pane logo). A flat
+    // background is auto-removed so a shaped logo shows no white/colored box.
     val orbPath by AppSettings.orbImageFlow(context).collectAsState(initial = "")
     val orbBitmap = remember(orbPath) {
         orbPath.takeIf { it.isNotEmpty() && java.io.File(it).exists() }
-            ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 128)?.asImageBitmap() }
+            ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 128) }
+            ?.let { com.neversoft.launcher.files.ImageStore.removeFlatBackground(it) }
+            ?.asImageBitmap()
     }
 
     // Taskbar pins, shared with the Start menu via DataStore
@@ -161,12 +164,13 @@ fun Taskbar(
                 ) {
                     TaskbarButton(onClick = onStartClick) {
                         if (orbBitmap != null) {
-                            // Custom orb fills the button, larger than the stock logo
+                            // Fit (not Crop) so any shape shows whole; transparent
+                            // background (auto-removed) lets the taskbar show through
                             Image(
                                 bitmap = orbBitmap,
                                 contentDescription = "Start",
-                                modifier = Modifier.size(38.dp).clip(RoundedCornerShape(7.dp)),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(38.dp),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                             )
                         } else {
                             StartLogo(22.dp)

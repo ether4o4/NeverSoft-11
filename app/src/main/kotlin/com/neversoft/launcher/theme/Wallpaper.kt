@@ -35,9 +35,10 @@ object DesktopWallpaper {
 fun BloomWallpaper(isDark: Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val customPath by AppSettings.wallpaperImageFlow(context).collectAsState(initial = "")
+    val fit by AppSettings.wallpaperFitFlow(context).collectAsState(initial = "crop")
     val customBitmap = remember(customPath) {
         customPath.takeIf { it.isNotEmpty() && File(it).exists() }
-            ?.let { ImageStore.decodeSampled(it, 1600)?.asImageBitmap() }
+            ?.let { ImageStore.decodeSampled(it, 2400)?.asImageBitmap() }
     }
 
     if (customBitmap != null) {
@@ -45,7 +46,9 @@ fun BloomWallpaper(isDark: Boolean, modifier: Modifier = Modifier) {
             bitmap = customBitmap,
             contentDescription = null,
             modifier = modifier.background(if (isDark) DesktopWallpaper.DarkBase else DesktopWallpaper.LightBase),
-            contentScale = ContentScale.Crop,
+            // "exact" maps the image to exactly the screen size — one static
+            // page, no cropping and no scroll-parallax oversizing
+            contentScale = if (fit == "exact") ContentScale.FillBounds else ContentScale.Crop,
         )
         return
     }

@@ -40,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
@@ -160,13 +161,12 @@ fun Desktop(
         itemsLoaded = true
     }
 
-    // App icons for shortcuts
-    val appIcons = remember(items) {
-        val pm = context.packageManager
+    // App icons for shortcuts, honoring the active icon pack
+    val iconPack by AppSettings.iconPackFlow(context).collectAsState(initial = "")
+    val appIcons = remember(items, iconPack) {
         items.filter { it.kind == "app" }.mapNotNull { item ->
-            runCatching {
-                item.id to pm.getApplicationIcon(item.pkg!!).toBitmap(96, 96).asImageBitmap()
-            }.getOrNull()
+            InstalledAppsRepository.loadIcon(context, iconPack, item.pkg!!)
+                ?.let { item.id to it.asImageBitmap() }
         }.toMap()
     }
 

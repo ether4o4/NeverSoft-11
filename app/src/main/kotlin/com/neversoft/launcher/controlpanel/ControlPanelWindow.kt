@@ -53,6 +53,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import com.neversoft.launcher.apps.IconPacks
 import com.neversoft.launcher.data.AppSettings
 import com.neversoft.launcher.files.ImageStore
 import com.neversoft.launcher.theme.LauncherThemes
@@ -315,6 +317,20 @@ private fun PersonalizationPage(
                 })
             }
         }
+        if (wallpaperSet.isNotEmpty()) {
+            val fit by AppSettings.wallpaperFitFlow(context).collectAsState(initial = "crop")
+            Spacer(Modifier.height(8.dp))
+            Text("Wallpaper fit", color = theme.textSecondary, fontSize = 12.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FitOption("Exact screen size", selected = fit == "exact") {
+                    scope.launch { AppSettings.setWallpaperFit(context, "exact") }
+                }
+                FitOption("Fill (crop)", selected = fit == "crop") {
+                    scope.launch { AppSettings.setWallpaperFit(context, "crop") }
+                }
+            }
+        }
 
         Spacer(Modifier.height(16.dp))
         Text("Start button", color = theme.textSecondary, fontSize = 12.sp)
@@ -327,7 +343,99 @@ private fun PersonalizationPage(
                 })
             }
         }
+
+        // Icon packs — any installed pack from any launcher ecosystem
+        Spacer(Modifier.height(16.dp))
+        Text("Icon pack", color = theme.textSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
+        val iconPack by AppSettings.iconPackFlow(context).collectAsState(initial = "")
+        var packPickerOpen by remember { mutableStateOf(false) }
+        var packs by remember { mutableStateOf<List<IconPacks.PackInfo>>(emptyList()) }
+        val currentPackLabel = remember(iconPack, packs) {
+            if (iconPack.isEmpty()) "System icons"
+            else packs.firstOrNull { it.packageName == iconPack }?.label ?: iconPack
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            AccentButton("Choose icon pack", onClick = {
+                packs = IconPacks.listPacks(context)
+                packPickerOpen = true
+            })
+            Text(currentPackLabel, color = theme.text, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+
+        if (packPickerOpen) {
+            Dialog(onDismissRequest = { packPickerOpen = false }) {
+                Column(
+                    Modifier
+                        .width(300.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(theme.windowSurface)
+                        .border(1.dp, theme.stroke, RoundedCornerShape(8.dp))
+                        .padding(16.dp),
+                ) {
+                    Text("Icon pack", color = theme.text, fontSize = 16.sp)
+                    Spacer(Modifier.height(10.dp))
+                    PackRow("System icons", selected = iconPack.isEmpty()) {
+                        packPickerOpen = false
+                        scope.launch { AppSettings.setIconPack(context, "") }
+                    }
+                    if (packs.isEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "No icon packs installed. Install any icon pack app (Nova/ADW/GO compatible) and it will show up here.",
+                            color = theme.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
+                        )
+                    } else {
+                        packs.forEach { pack ->
+                            PackRow(pack.label, selected = iconPack == pack.packageName) {
+                                packPickerOpen = false
+                                scope.launch { AppSettings.setIconPack(context, pack.packageName) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FitOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    val theme = LocalLauncherTheme.current
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (selected) theme.accent else theme.card)
+            .border(1.dp, theme.stroke, RoundedCornerShape(4.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = if (selected) theme.accentText else theme.text,
+            fontSize = 12.sp,
+        )
+    }
+}
+
+@Composable
+private fun PackRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    val theme = LocalLauncherTheme.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (selected) theme.hover else Color.Transparent)
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = theme.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        if (selected) {
+            Box(Modifier.size(7.dp).clip(CircleShape).background(theme.accent))
+        }
     }
 }
 

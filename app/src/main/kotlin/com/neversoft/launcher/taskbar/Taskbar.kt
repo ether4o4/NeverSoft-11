@@ -114,6 +114,7 @@ fun Taskbar(
     }
 
     // Taskbar pins, shared with the Start menu via DataStore
+    val iconPack by AppSettings.iconPackFlow(context).collectAsState(initial = "")
     val dockPinsJson by AppSettings.dockPinsFlow(context).collectAsState(initial = "[]")
     val pinnedPkgs = remember(dockPinsJson) {
         runCatching {
@@ -121,7 +122,7 @@ fun Taskbar(
             List(arr.length()) { arr.getString(it) }
         }.getOrDefault(emptyList())
     }
-    val pinnedApps = remember(pinnedPkgs) {
+    val pinnedApps = remember(pinnedPkgs, iconPack) {
         val pm = context.packageManager
         pinnedPkgs.mapNotNull { pkg ->
             runCatching {
@@ -129,7 +130,7 @@ fun Taskbar(
                 TaskbarApp(
                     packageName = pkg,
                     label = pm.getApplicationLabel(info).toString(),
-                    icon = pm.getApplicationIcon(info).toBitmap(96, 96).asImageBitmap(),
+                    icon = InstalledAppsRepository.loadIcon(context, iconPack, pkg)?.asImageBitmap(),
                 )
             }.getOrNull()
         }
@@ -160,10 +161,11 @@ fun Taskbar(
                 ) {
                     TaskbarButton(onClick = onStartClick) {
                         if (orbBitmap != null) {
+                            // Custom orb fills the button, larger than the stock logo
                             Image(
                                 bitmap = orbBitmap,
                                 contentDescription = "Start",
-                                modifier = Modifier.size(26.dp).clip(RoundedCornerShape(5.dp)),
+                                modifier = Modifier.size(38.dp).clip(RoundedCornerShape(7.dp)),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                             )
                         } else {

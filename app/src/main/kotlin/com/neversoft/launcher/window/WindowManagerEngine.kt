@@ -78,6 +78,18 @@ class WindowManagerEngine {
 
     fun moveWindow(id: String, newPosition: Offset) = updateWindow(id) { it.copy(position = newPosition) }
 
+    // Relative move/resize: the transform reads the window's CURRENT state,
+    // so rapid incremental drag deltas accumulate correctly even though the
+    // gesture handler holds a stale snapshot of the window.
+    fun moveWindowBy(id: String, delta: Offset) = updateWindow(id) { w ->
+        w.copy(
+            position = Offset(
+                (w.position.x + delta.x).coerceAtLeast(0f),
+                (w.position.y + delta.y).coerceAtLeast(0f),
+            ),
+        )
+    }
+
     fun resizeWindow(id: String, newSize: DpSize) = updateWindow(id) { w ->
         w.copy(
             size = DpSize(
@@ -86,6 +98,16 @@ class WindowManagerEngine {
             ),
         )
     }
+
+    fun resizeWindowBy(id: String, deltaWidth: androidx.compose.ui.unit.Dp, deltaHeight: androidx.compose.ui.unit.Dp) =
+        updateWindow(id) { w ->
+            w.copy(
+                size = DpSize(
+                    (w.size.width + deltaWidth).coerceIn(280.dp, 1400.dp),
+                    (w.size.height + deltaHeight).coerceIn(320.dp, 2400.dp),
+                ),
+            )
+        }
 
     fun reorderToFront(id: String) = focusWindow(id)
 

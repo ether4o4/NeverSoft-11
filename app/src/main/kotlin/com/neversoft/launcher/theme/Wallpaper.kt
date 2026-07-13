@@ -38,7 +38,7 @@ fun BloomWallpaper(isDark: Boolean, modifier: Modifier = Modifier) {
     val fit by AppSettings.wallpaperFitFlow(context).collectAsState(initial = "crop")
     val customBitmap = remember(customPath) {
         customPath.takeIf { it.isNotEmpty() && File(it).exists() }
-            ?.let { ImageStore.decodeSampled(it, 2400)?.asImageBitmap() }
+            ?.let { ImageStore.decodeSampled(it, 1600)?.asImageBitmap() }
     }
 
     if (customBitmap != null) {

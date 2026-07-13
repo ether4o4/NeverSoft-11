@@ -111,7 +111,7 @@ fun Taskbar(
     val orbPath by AppSettings.orbImageFlow(context).collectAsState(initial = "")
     val orbBitmap = remember(orbPath) {
         orbPath.takeIf { it.isNotEmpty() && java.io.File(it).exists() }
-            ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 128) }
+            ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 256) }
             ?.let { com.neversoft.launcher.files.ImageStore.removeFlatBackground(it) }
             ?.asImageBitmap()
     }
@@ -172,6 +172,7 @@ fun Taskbar(
                                 contentDescription = "Start",
                                 modifier = Modifier.size(38.dp).clip(androidx.compose.foundation.shape.CircleShape),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
                             )
                         } else {
                             StartLogo(22.dp)
@@ -281,7 +282,7 @@ private fun PinnedTaskbarButton(
             contentAlignment = Alignment.Center,
         ) {
             if (app.icon != null) {
-                Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(24.dp))
+                Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(24.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
             } else {
                 Text(app.label.take(1).uppercase(), color = theme.text, fontSize = 14.sp)
             }

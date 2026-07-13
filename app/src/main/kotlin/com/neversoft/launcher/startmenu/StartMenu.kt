@@ -580,7 +580,7 @@ private fun PinnedAppTile(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (app.icon != null) {
-                Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(32.dp))
+                Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(32.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
             } else {
                 Box(
                     Modifier.size(32.dp).background(theme.card, RoundedCornerShape(6.dp)),
@@ -711,7 +711,7 @@ private fun AllAppsView(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (app.icon != null) {
-                                Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(24.dp))
+                                Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(24.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
                             } else {
                                 Box(
                                     Modifier.size(24.dp).background(theme.card, RoundedCornerShape(5.dp)),
@@ -790,7 +790,7 @@ private fun SearchResultsView(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (appIcon != null) {
-                                Image(bitmap = appIcon, contentDescription = null, modifier = Modifier.size(28.dp))
+                                Image(bitmap = appIcon, contentDescription = null, modifier = Modifier.size(28.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
                             } else {
                                 Icon(
                                     when (result.type) {

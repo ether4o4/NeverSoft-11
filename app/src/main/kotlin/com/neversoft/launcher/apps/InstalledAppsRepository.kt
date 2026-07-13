@@ -83,5 +83,5 @@ object InstalledAppsRepository {
         runCatching { context.startActivity(intent) }
     }
 
-    private const val ICON_SIZE_PX = 128
+    private const val ICON_SIZE_PX = 168
 }

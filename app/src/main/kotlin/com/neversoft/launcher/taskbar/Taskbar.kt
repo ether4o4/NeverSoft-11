@@ -164,13 +164,14 @@ fun Taskbar(
                 ) {
                     TaskbarButton(onClick = onStartClick) {
                         if (orbBitmap != null) {
-                            // Fit (not Crop) so any shape shows whole; transparent
-                            // background (auto-removed) lets the taskbar show through
+                            // Clip to a circle and fill it: the Start button is
+                            // round, so this guarantees no square/white box shows
+                            // behind a shaped logo regardless of its background.
                             Image(
                                 bitmap = orbBitmap,
                                 contentDescription = "Start",
-                                modifier = Modifier.size(38.dp),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                modifier = Modifier.size(38.dp).clip(androidx.compose.foundation.shape.CircleShape),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                             )
                         } else {
                             StartLogo(22.dp)

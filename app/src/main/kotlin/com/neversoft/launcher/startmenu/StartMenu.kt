@@ -10,6 +10,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -569,10 +570,12 @@ private fun PinnedAppTile(
         Column(
             Modifier
                 .clip(RoundedCornerShape(4.dp))
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = { menuOpen = true },
-                )
+                .pointerInput(app.packageName) {
+                    detectTapGestures(
+                        onTap = { onClick() },
+                        onLongPress = { menuOpen = true },
+                    )
+                }
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -698,10 +701,12 @@ private fun AllAppsView(
                             Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(4.dp))
-                                .combinedClickable(
-                                    onClick = { onLaunch(app) },
-                                    onLongClick = { menuOpen = true },
-                                )
+                                .pointerInput(app.packageName) {
+                                    detectTapGestures(
+                                        onTap = { onLaunch(app) },
+                                        onLongPress = { menuOpen = true },
+                                    )
+                                }
                                 .padding(horizontal = 12.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {

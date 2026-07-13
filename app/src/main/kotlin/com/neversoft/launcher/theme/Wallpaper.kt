@@ -49,6 +49,7 @@ fun BloomWallpaper(isDark: Boolean, modifier: Modifier = Modifier) {
             // "exact" maps the image to exactly the screen size — one static
             // page, no cropping and no scroll-parallax oversizing
             contentScale = if (fit == "exact") ContentScale.FillBounds else ContentScale.Crop,
+            filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
         )
         return
     }

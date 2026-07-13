@@ -413,7 +413,7 @@ fun Desktop(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 if (app.icon != null) {
-                                    Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(26.dp))
+                                    Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(26.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
                                 }
                                 Spacer(Modifier.width(12.dp))
                                 Text(
@@ -456,7 +456,7 @@ private fun DesktopIconWithMenu(
         ) {
             when {
                 item.kind == "app" && appIcon != null ->
-                    Image(bitmap = appIcon, contentDescription = item.label, modifier = Modifier.size(38.dp))
+                    Image(bitmap = appIcon, contentDescription = item.label, modifier = Modifier.size(38.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
                 item.kind == "folder" ->
                     Icon(Icons.Filled.Folder, item.label, Modifier.size(38.dp), tint = Color(0xFFFFCA28))
                 else -> {

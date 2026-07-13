@@ -58,7 +58,7 @@ object IconPacks {
         val id = res.getIdentifier(drawableName, "drawable", packPkg)
         if (id == 0) return null
         return runCatching {
-            androidx.core.content.res.ResourcesCompat.getDrawable(res, id, null)?.toBitmap(128, 128)
+            androidx.core.content.res.ResourcesCompat.getDrawable(res, id, null)?.toBitmap(168, 168)
         }.getOrNull()
     }
 

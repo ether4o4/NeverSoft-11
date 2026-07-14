@@ -35,10 +35,9 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:stateNotNeeded="true"
-            android:clearTaskOnLaunch="true"
             android:resumeWhilePausing="true"
             android:windowSoftInputMode="adjustPan"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|keyboardHidden|density|smallestScreenSize|uiMode|navigation">
             <intent-filter android:priority="1">
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.HOME"/>
@@ -46,6 +45,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Recovery screen; runs in its own process so it survives a crash of
+             the main process and can show the real stack trace + Restart. -->
+        <activity
+            android:name=".CrashActivity"
+            android:exported="false"
+            android:process=":crash"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.neversoft.launcher.crash"/>
 
         <receiver android:name=".receiver.BootReceiver" android:exported="true">
             <intent-filter>

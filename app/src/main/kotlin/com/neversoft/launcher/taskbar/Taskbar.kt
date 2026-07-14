@@ -62,7 +62,9 @@ import com.neversoft.launcher.window.ShellWindow
 import com.neversoft.launcher.window.WindowContentType
 import com.neversoft.launcher.window.WindowState
 import com.neversoft.launcher.window.toIcon
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -106,14 +108,18 @@ fun Taskbar(
         }
     }
 
-    // Custom Start button image (falls back to the four-pane logo). A flat
-    // background is auto-removed so a shaped logo shows no white/colored box.
+    // Custom Start button image (falls back to the four-pane logo). Decode +
+    // flat-background removal run OFF the main thread to avoid blocking the UI
+    // during the home/overview transition.
     val orbPath by AppSettings.orbImageFlow(context).collectAsState(initial = "")
-    val orbBitmap = remember(orbPath) {
-        orbPath.takeIf { it.isNotEmpty() && java.io.File(it).exists() }
-            ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 256) }
-            ?.let { com.neversoft.launcher.files.ImageStore.removeFlatBackground(it) }
-            ?.asImageBitmap()
+    var orbBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(orbPath) {
+        orbBitmap = withContext(Dispatchers.IO) {
+            orbPath.takeIf { it.isNotEmpty() && java.io.File(it).exists() }
+                ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 256) }
+                ?.let { com.neversoft.launcher.files.ImageStore.removeFlatBackground(it) }
+                ?.asImageBitmap()
+        }
     }
 
     // Taskbar pins, shared with the Start menu via DataStore
@@ -125,17 +131,21 @@ fun Taskbar(
             List(arr.length()) { arr.getString(it) }
         }.getOrDefault(emptyList())
     }
-    val pinnedApps = remember(pinnedPkgs, iconPack) {
-        val pm = context.packageManager
-        pinnedPkgs.mapNotNull { pkg ->
-            runCatching {
-                val info = pm.getApplicationInfo(pkg, 0)
-                TaskbarApp(
-                    packageName = pkg,
-                    label = pm.getApplicationLabel(info).toString(),
-                    icon = InstalledAppsRepository.loadIcon(context, iconPack, pkg)?.asImageBitmap(),
-                )
-            }.getOrNull()
+    // Resolve labels + icons off the main thread
+    var pinnedApps by remember { mutableStateOf<List<TaskbarApp>>(emptyList()) }
+    LaunchedEffect(pinnedPkgs, iconPack) {
+        pinnedApps = withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            pinnedPkgs.mapNotNull { pkg ->
+                runCatching {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    TaskbarApp(
+                        packageName = pkg,
+                        label = pm.getApplicationLabel(info).toString(),
+                        icon = InstalledAppsRepository.loadIcon(context, iconPack, pkg)?.asImageBitmap(),
+                    )
+                }.getOrNull()
+            }
         }
     }
 
@@ -163,12 +173,13 @@ fun Taskbar(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     TaskbarButton(onClick = onStartClick) {
-                        if (orbBitmap != null) {
+                        val orb = orbBitmap
+                        if (orb != null) {
                             // Clip to a circle and fill it: the Start button is
                             // round, so this guarantees no square/white box shows
                             // behind a shaped logo regardless of its background.
                             Image(
-                                bitmap = orbBitmap,
+                                bitmap = orb,
                                 contentDescription = "Start",
                                 modifier = Modifier.size(38.dp).clip(androidx.compose.foundation.shape.CircleShape),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,

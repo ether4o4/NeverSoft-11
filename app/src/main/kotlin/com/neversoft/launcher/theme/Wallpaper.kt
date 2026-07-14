@@ -3,15 +3,21 @@ package com.neversoft.launcher.theme
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -19,6 +25,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import com.neversoft.launcher.data.AppSettings
 import com.neversoft.launcher.files.ImageStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.min
 
@@ -36,27 +44,36 @@ fun BloomWallpaper(isDark: Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val customPath by AppSettings.wallpaperImageFlow(context).collectAsState(initial = "")
     val fit by AppSettings.wallpaperFitFlow(context).collectAsState(initial = "crop")
-    val customBitmap = remember(customPath) {
-        customPath.takeIf { it.isNotEmpty() && File(it).exists() }
-            ?.let { ImageStore.decodeSampled(it, 1600)?.asImageBitmap() }
+    val base = if (isDark) DesktopWallpaper.DarkBase else DesktopWallpaper.LightBase
+
+    // Decode the custom wallpaper OFF the main thread — decoding a large
+    // bitmap during the home/overview transition on the UI thread was a
+    // major source of jank and freezes.
+    var customBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(customPath) {
+        customBitmap = withContext(Dispatchers.IO) {
+            customPath.takeIf { it.isNotEmpty() && File(it).exists() }
+                ?.let { ImageStore.decodeSampled(it, 1600)?.asImageBitmap() }
+        }
     }
 
-    if (customBitmap != null) {
-        Image(
-            bitmap = customBitmap,
+    when {
+        customBitmap != null -> Image(
+            bitmap = customBitmap!!,
             contentDescription = null,
-            modifier = modifier.background(if (isDark) DesktopWallpaper.DarkBase else DesktopWallpaper.LightBase),
+            modifier = modifier.background(base),
             // "exact" maps the image to exactly the screen size — one static
             // page, no cropping and no scroll-parallax oversizing
             contentScale = if (fit == "exact") ContentScale.FillBounds else ContentScale.Crop,
             filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
         )
-        return
-    }
-
-    val base = if (isDark) DesktopWallpaper.DarkBase else DesktopWallpaper.LightBase
-    Canvas(modifier.background(base)) {
-        if (isDark) drawDarkBloom() else drawLightBloom()
+        // A custom wallpaper is set but still decoding: hold the base color
+        // (no procedural-bloom flash before the photo appears)
+        customPath.isNotEmpty() -> Box(modifier.fillMaxSize().background(base))
+        // Default: procedural, vector-drawn bloom (no bitmap, always crisp)
+        else -> Canvas(modifier.background(base)) {
+            if (isDark) drawDarkBloom() else drawLightBloom()
+        }
     }
 }
 

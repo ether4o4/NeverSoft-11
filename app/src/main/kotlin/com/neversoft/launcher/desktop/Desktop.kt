@@ -165,13 +165,17 @@ fun Desktop(
         itemsLoaded = true
     }
 
-    // App icons for shortcuts, honoring the active icon pack
+    // App icons for shortcuts, honoring the active icon pack. Resolved off the
+    // main thread so decoding never blocks the UI during a home transition.
     val iconPack by AppSettings.iconPackFlow(context).collectAsState(initial = "")
-    val appIcons = remember(items, iconPack) {
-        items.filter { it.kind == "app" }.mapNotNull { item ->
-            InstalledAppsRepository.loadIcon(context, iconPack, item.pkg!!)
-                ?.let { item.id to it.asImageBitmap() }
-        }.toMap()
+    var appIcons by remember { mutableStateOf(emptyMap<String, androidx.compose.ui.graphics.ImageBitmap>()) }
+    LaunchedEffect(items, iconPack) {
+        appIcons = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            items.filter { it.kind == "app" }.mapNotNull { item ->
+                InstalledAppsRepository.loadIcon(context, iconPack, item.pkg!!)
+                    ?.let { item.id to it.asImageBitmap() }
+            }.toMap()
+        }
     }
 
     val cellPx = with(density) { 92.dp.toPx() }

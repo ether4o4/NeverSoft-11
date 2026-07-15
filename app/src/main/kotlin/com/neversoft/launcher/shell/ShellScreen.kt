@@ -64,6 +64,15 @@ private fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
+// Crash-proof clamp: when the available [max] is smaller than the desired
+// [min] (e.g. the launcher is measured at a tiny overview/recents thumbnail
+// during a swipe-up), coerceIn(min, max) would throw because min > max. Fall
+// back to the available space instead of crashing the whole shell.
+private fun coerceDp(value: Dp, min: Dp, max: Dp): Dp {
+    val safeMax = max.coerceAtLeast(0.dp)
+    return if (safeMax <= min) safeMax else value.coerceIn(min, safeMax)
+}
+
 private fun parseSize(raw: String): DpSize? = raw.split(",")
     .takeIf { it.size == 2 }
     ?.let { parts ->
@@ -109,14 +118,14 @@ fun ShellScreen(
             calendarSize = parseSize(AppSettings.calendarSizeFlow(context).first())
         }
         fun clampMenu(size: DpSize) = DpSize(
-            size.width.coerceIn(320.dp, menuMaxW),
-            size.height.coerceIn(420.dp, menuMaxH),
+            coerceDp(size.width, 320.dp, menuMaxW),
+            coerceDp(size.height, 420.dp, menuMaxH),
         )
         val effectiveMenu = clampMenu(startMenuSize ?: defaultMenu)
         val defaultCalendar = DpSize(348.dp, if (menuMaxH < 540.dp) menuMaxH else 540.dp)
         fun clampCalendar(size: DpSize) = DpSize(
-            size.width.coerceIn(300.dp, menuMaxW),
-            size.height.coerceIn(420.dp, menuMaxH),
+            coerceDp(size.width, 300.dp, menuMaxW),
+            coerceDp(size.height, 420.dp, menuMaxH),
         )
         val effectiveCalendar = clampCalendar(calendarSize ?: defaultCalendar)
 

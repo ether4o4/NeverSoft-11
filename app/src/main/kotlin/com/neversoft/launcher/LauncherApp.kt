@@ -10,7 +10,28 @@ import java.util.Locale
 class LauncherApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        resetCrashLogOnUpgrade()
         installCrashHandler()
+    }
+
+    // Clear the crash logs whenever the installed version changes, so a fresh
+    // build never shows crashes from an older one (which made a fixed bug look
+    // like it was still happening).
+    private fun resetCrashLogOnUpgrade() {
+        runCatching {
+            val prefs = getSharedPreferences("crash_meta", MODE_PRIVATE)
+            val current = runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }.getOrNull() ?: "?"
+            if (prefs.getString("logged_version", null) != current) {
+                File(filesDir, "crash_log.txt").delete()
+                getExternalFilesDir(null)?.let { File(it, "crash_log.txt").delete() }
+                android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS,
+                ).let { File(it, "neversoft11_crash_log.txt").delete() }
+                prefs.edit().putString("logged_version", current).apply()
+            }
+        }
     }
 
     // On an uncaught crash: log the full stack trace, show a recovery screen

@@ -22,6 +22,8 @@ object AppSettings {
     val KEY_WALLPAPER_FIT             = stringPreferencesKey("wallpaper_fit")
     val KEY_START_MENU_SIZE           = stringPreferencesKey("start_menu_size")
     val KEY_CALENDAR_SIZE             = stringPreferencesKey("calendar_size")
+    val KEY_START_FOLDERS             = stringPreferencesKey("start_folders")
+    val KEY_RECENT_OPENED_FILES       = stringPreferencesKey("recent_opened_files")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -86,6 +88,30 @@ object AppSettings {
 
     suspend fun setCalendarSize(context: Context, size: String) =
         context.dataStore.edit { it[KEY_CALENDAR_SIZE] = size }
+
+    // Start-menu folders: JSON array of {name, apps:[pkg,...]} (4 folders, <=4 apps each)
+    fun startFoldersFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_START_FOLDERS] ?: "" }
+
+    suspend fun setStartFolders(context: Context, json: String) =
+        context.dataStore.edit { it[KEY_START_FOLDERS] = json }
+
+    // Recently-opened file paths, most recent first (capped)
+    fun recentOpenedFilesFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_RECENT_OPENED_FILES] ?: "[]" }
+
+    suspend fun addRecentOpenedFile(context: Context, path: String) {
+        context.dataStore.edit { prefs ->
+            val existing = runCatching {
+                val arr = org.json.JSONArray(prefs[KEY_RECENT_OPENED_FILES] ?: "[]")
+                MutableList(arr.length()) { arr.getString(it) }
+            }.getOrDefault(mutableListOf())
+            existing.remove(path)
+            existing.add(0, path)
+            while (existing.size > 30) existing.removeAt(existing.size - 1)
+            prefs[KEY_RECENT_OPENED_FILES] = org.json.JSONArray(existing).toString()
+        }
+    }
 
     fun isFirstRunFlow(context: Context): Flow<Boolean> =
         context.dataStore.data.map { it[KEY_FIRST_RUN] ?: true }

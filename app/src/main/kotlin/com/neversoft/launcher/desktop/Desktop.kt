@@ -7,7 +7,7 @@ import android.provider.Settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -144,25 +144,41 @@ fun Desktop(
         }
     }
 
+    // Observe the desktop-items store live, so shortcuts added elsewhere
+    // (e.g. "Create desktop shortcut" in the Start menu's All apps) appear
+    // without a relaunch.
     LaunchedEffect(Unit) {
-        val stored = AppSettings.desktopItemsFlow(context).first()
-        items = if (stored.isEmpty()) {
-            // First run: seed with the built-in shell icons
-            persistItems(BUILTINS)
-            BUILTINS
-        } else {
-            runCatching {
-                val arr = JSONArray(stored)
-                List(arr.length()) { deskItemFrom(arr.getJSONObject(it)) }
-            }.getOrDefault(BUILTINS)
+        AppSettings.desktopItemsFlow(context).collect { stored ->
+            val parsed = if (stored.isEmpty()) {
+                null // never seeded
+            } else {
+                runCatching {
+                    val arr = JSONArray(stored)
+                    List(arr.length()) { deskItemFrom(arr.getJSONObject(it)) }
+                }.getOrNull()
+            }
+            if (parsed == null) {
+                // First run: seed with the built-in shell icons (re-emits below)
+                if (!itemsLoaded) persistItems(BUILTINS)
+            } else {
+                // Drop shortcuts to apps that were uninstalled
+                val pm = context.packageManager
+                val cleaned = parsed.filter { item ->
+                    item.kind != "app" ||
+                        runCatching { pm.getApplicationInfo(item.pkg!!, 0) }.isSuccess
+                }
+                items = cleaned
+                if (cleaned.size != parsed.size) {
+                    scope.launch {
+                        AppSettings.setDesktopItems(
+                            context,
+                            JSONArray().apply { cleaned.forEach { put(it.toJson()) } }.toString(),
+                        )
+                    }
+                }
+                itemsLoaded = true
+            }
         }
-        // Drop shortcuts to apps that were uninstalled
-        val pm = context.packageManager
-        val cleaned = items.filter { item ->
-            item.kind != "app" || runCatching { pm.getApplicationInfo(item.pkg!!, 0) }.isSuccess
-        }
-        if (cleaned.size != items.size) persistItems(cleaned)
-        itemsLoaded = true
     }
 
     // App icons for shortcuts, honoring the active icon pack. Resolved off the
@@ -271,32 +287,27 @@ fun Desktop(
                         item = item,
                         appIcon = appIcons[item.id],
                         modifier = Modifier
-                            .offset { IntOffset(pos.x.roundToInt(), pos.y.roundToInt()) }
-                            .pointerInput(item.id) {
-                                detectDragGestures(
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        val current = positions[item.id] ?: Offset.Zero
-                                        positions[item.id] = Offset(
-                                            (current.x + dragAmount.x).coerceAtLeast(0f),
-                                            (current.y + dragAmount.y).coerceAtLeast(0f),
-                                        )
-                                    },
-                                    onDragEnd = {
-                                        val current = positions[item.id] ?: Offset.Zero
-                                        positions[item.id] = Offset(
-                                            marginPx + ((current.x - marginPx) / cellPx).roundToInt()
-                                                .coerceAtLeast(0) * cellPx,
-                                            marginPx + ((current.y - marginPx) / cellPx).roundToInt()
-                                                .coerceAtLeast(0) * cellPx,
-                                        )
-                                        persistPositions()
-                                    },
-                                )
-                            },
+                            .offset { IntOffset(pos.x.roundToInt(), pos.y.roundToInt()) },
                         onOpen = { activate(item) },
                         onRemove = { persistItems(items - item) },
                         onRename = { renameTarget = item },
+                        onDragDelta = { dragAmount ->
+                            val current = positions[item.id] ?: Offset.Zero
+                            positions[item.id] = Offset(
+                                (current.x + dragAmount.x).coerceAtLeast(0f),
+                                (current.y + dragAmount.y).coerceAtLeast(0f),
+                            )
+                        },
+                        onDragEnd = {
+                            val current = positions[item.id] ?: Offset.Zero
+                            positions[item.id] = Offset(
+                                marginPx + ((current.x - marginPx) / cellPx).roundToInt()
+                                    .coerceAtLeast(0) * cellPx,
+                                marginPx + ((current.y - marginPx) / cellPx).roundToInt()
+                                    .coerceAtLeast(0) * cellPx,
+                            )
+                            persistPositions()
+                        },
                     )
                 }
             }
@@ -441,6 +452,8 @@ private fun DesktopIconWithMenu(
     onOpen: () -> Unit,
     onRemove: () -> Unit,
     onRename: () -> Unit,
+    onDragDelta: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
@@ -450,10 +463,23 @@ private fun DesktopIconWithMenu(
         Column(
             Modifier
                 .width(80.dp)
+                // Quick tap opens the icon.
                 .pointerInput(item.id) {
-                    detectTapGestures(
-                        onTap = { onOpen() },
-                        onLongPress = { menuOpen = true },
+                    detectTapGestures(onTap = { onOpen() })
+                }
+                // Long-press then drag to move; long-press and release without
+                // moving opens the context menu (Windows right-click equivalent).
+                .pointerInput(item.id) {
+                    var moved = false
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { moved = false },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            moved = true
+                            onDragDelta(dragAmount)
+                        },
+                        onDragEnd = { if (moved) onDragEnd() else menuOpen = true },
+                        onDragCancel = { if (!moved) menuOpen = true },
                     )
                 },
             horizontalAlignment = Alignment.CenterHorizontally,

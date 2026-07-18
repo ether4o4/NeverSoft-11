@@ -4,10 +4,20 @@ import android.content.Context
 import android.content.Intent
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
+import com.neversoft.launcher.data.AppSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 
 object FileOpener {
     fun open(context: Context, file: File) {
+        // Record it as recently-opened for the Start menu (best effort)
+        if (file.isFile) {
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching { AppSettings.addRecentOpenedFile(context, file.absolutePath) }
+            }
+        }
         runCatching {
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             val mime = MimeTypeMap.getSingleton()

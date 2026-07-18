@@ -3,16 +3,16 @@ package com.neversoft.launcher.startmenu
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.Environment
 import android.provider.Settings
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -27,9 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,7 +35,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.outlined.AddToHomeScreen
 import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Lock
@@ -83,9 +82,6 @@ import com.neversoft.launcher.theme.LocalLauncherTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 enum class PowerAction { LOCK, SLEEP, SHUT_DOWN, RESTART, SIGN_OUT }
 
@@ -119,8 +115,6 @@ fun StartMenu(
         apps = InstalledAppsRepository.loadApps(context)
         appsLoaded = true
     }
-    val recentFiles = remember { loadRecentFiles() }
-
     // User-chosen pinned apps (package names, in pin order)
     var pins by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(Unit) {
@@ -158,6 +152,57 @@ fun StartMenu(
         scope.launch {
             com.neversoft.launcher.data.AppSettings.setDockPins(
                 context, org.json.JSONArray(newPins).toString(),
+            )
+        }
+    }
+
+    // Start-menu folders (4 folders, up to 4 apps each)
+    var folders by remember { mutableStateOf(StartFolders.parse("")) }
+    LaunchedEffect(Unit) {
+        com.neversoft.launcher.data.AppSettings.startFoldersFlow(context).collect { json ->
+            folders = StartFolders.parse(json)
+        }
+    }
+
+    fun addToFolder(pkg: String, folderIndex: Int) {
+        val updated = folders.mapIndexed { i, f ->
+            if (i == folderIndex && !f.apps.contains(pkg) && f.apps.size < StartFolders.CAPACITY) {
+                f.copy(apps = f.apps + pkg)
+            } else f
+        }
+        folders = updated
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setStartFolders(context, StartFolders.serialize(updated))
+        }
+    }
+
+    fun addToDesktop(app: InstalledApp) {
+        scope.launch {
+            runCatching {
+                val raw = com.neversoft.launcher.data.AppSettings.desktopItemsFlow(context).first()
+                val arr = if (raw.isBlank()) org.json.JSONArray() else org.json.JSONArray(raw)
+                val id = "app_${app.packageName}"
+                var exists = false
+                for (i in 0 until arr.length()) {
+                    if (arr.getJSONObject(i).optString("id") == id) { exists = true; break }
+                }
+                if (!exists) {
+                    arr.put(
+                        org.json.JSONObject()
+                            .put("id", id).put("kind", "app")
+                            .put("label", app.label).put("pkg", app.packageName),
+                    )
+                    com.neversoft.launcher.data.AppSettings.setDesktopItems(context, arr.toString())
+                }
+            }
+        }
+    }
+
+    fun uninstall(pkg: String) {
+        runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:$pkg"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
         }
     }
@@ -262,7 +307,7 @@ fun StartMenu(
                         apps = apps, appsLoaded = appsLoaded, columns = columns,
                         pins = pins,
                         dockPins = dockPins,
-                        recentFiles = recentFiles,
+                        folders = folders,
                         onAllApps = { view = StartView.ALL_APPS },
                         onLaunch = { app ->
                             InstalledAppsRepository.launch(context, app.packageName)
@@ -274,11 +319,13 @@ fun StartMenu(
                             FileOpener.open(context, file)
                             onDismiss()
                         },
+                        onOpenFileExplorer = onOpenFileExplorer,
                     )
                     StartView.ALL_APPS -> AllAppsView(
                         apps = apps,
                         pins = pins,
                         dockPins = dockPins,
+                        folders = folders,
                         onBack = { view = StartView.PINNED },
                         onLaunch = { app ->
                             InstalledAppsRepository.launch(context, app.packageName)
@@ -288,6 +335,9 @@ fun StartMenu(
                             setPins(if (pins.contains(pkg)) pins - pkg else pins + pkg)
                         },
                         onToggleDockPin = { pkg -> toggleDockPin(pkg) },
+                        onAddToDesktop = { app -> addToDesktop(app) },
+                        onAddToFolder = { pkg, idx -> addToFolder(pkg, idx) },
+                        onUninstall = { pkg -> uninstall(pkg) },
                     )
                     StartView.SEARCH -> SearchResultsView(
                         query = query, results = results, apps = apps,
@@ -494,34 +544,54 @@ private fun PinnedView(
     columns: Int,
     pins: List<String>,
     dockPins: List<String>,
-    recentFiles: List<File>,
+    folders: List<StartFolder>,
     onAllApps: () -> Unit,
     onLaunch: (InstalledApp) -> Unit,
     onUnpin: (String) -> Unit,
     onToggleDockPin: (String) -> Unit,
     onOpenFile: (File) -> Unit,
+    onOpenFileExplorer: () -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
-    // The pinned grid IS the pins list — every tile is removable, and any
-    // app can be added from All apps
+    val context = LocalContext.current
+    val perRow = columns
     val pinnedApps = pins.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }
 
-    Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
+    // Recent rows, resolved off the main thread
+    var recentApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
+    var recentlyInstalled by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
+    var recentlyOpened by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
+    var recentlyAdded by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
+    LaunchedEffect(apps) {
+        if (apps.isNotEmpty()) {
+            recentApps = StartData.recentApps(context, apps, perRow)
+            recentlyInstalled = StartData.recentlyInstalledApps(context, apps, perRow)
+        }
+        recentlyOpened = StartData.recentlyOpenedFiles(context, perRow)
+        recentlyAdded = StartData.recentlyAddedFiles(perRow)
+    }
+
+    var openFolder by remember { mutableStateOf<Int?>(null) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 12.dp),
+    ) {
+        // ——— Pinned: one row of apps + a row of 4 folders ———
         SectionHeader("Pinned", "All apps", onAllApps)
         Spacer(Modifier.height(10.dp))
-        Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp)) {
-            when {
-                !appsLoaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Loading…", color = theme.textSecondary, fontSize = 12.sp)
-                }
-                pinnedApps.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Long-press an app in All apps to pin it here",
-                        color = theme.textSecondary, fontSize = 12.sp,
-                    )
-                }
-                else -> LazyVerticalGrid(columns = GridCells.Fixed(columns)) {
-                    items(pinnedApps, key = { it.packageName }) { app ->
+        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            if (pinnedApps.isEmpty()) {
+                Text(
+                    if (!appsLoaded) "Loading…" else "Long-press an app in All apps to pin it here",
+                    color = theme.textSecondary, fontSize = 12.sp,
+                    modifier = Modifier.padding(vertical = 14.dp),
+                )
+            } else {
+                pinnedApps.take(perRow).forEach { app ->
+                    Box(Modifier.weight(1f)) {
                         PinnedAppTile(
                             app = app,
                             isDockPinned = dockPins.contains(app.packageName),
@@ -531,27 +601,164 @@ private fun PinnedView(
                         )
                     }
                 }
+                repeat(perRow - pinnedApps.take(perRow).size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        Spacer(Modifier.height(12.dp))
-        SectionHeader("Recommended", null, null)
-        Spacer(Modifier.height(8.dp))
-        Box(Modifier.fillMaxWidth().height(120.dp).padding(horizontal = 20.dp)) {
-            if (recentFiles.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Your recent files will show here",
-                        color = theme.textSecondary, fontSize = 12.sp,
-                    )
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            folders.take(StartFolders.COUNT).forEachIndexed { index, folder ->
+                Box(Modifier.weight(1f)) {
+                    FolderTile(folder = folder, apps = apps) { openFolder = index }
                 }
-            } else {
-                LazyVerticalGrid(columns = GridCells.Fixed(2)) {
-                    items(recentFiles.take(6), key = { it.absolutePath }) { file ->
-                        RecommendedTile(file) { onOpenFile(file) }
+            }
+        }
+
+        // ——— Recent apps ———
+        RecentAppSection("Recent apps", recentApps, onSeeMore = onAllApps, perRow = perRow, onLaunch = onLaunch)
+        // ——— Recently opened files ———
+        RecentFileSection("Recently opened", recentlyOpened, onSeeMore = onOpenFileExplorer, perRow = perRow, onOpen = onOpenFile)
+        // ——— Recently added files ———
+        RecentFileSection("Recently added", recentlyAdded, onSeeMore = onOpenFileExplorer, perRow = perRow, onOpen = onOpenFile)
+        // ——— Recently installed apps ———
+        RecentAppSection("Recently installed", recentlyInstalled, onSeeMore = onAllApps, perRow = perRow, onLaunch = onLaunch)
+    }
+
+    // Folder contents dialog
+    openFolder?.let { idx ->
+        val folder = folders.getOrNull(idx) ?: return@let
+        val folderApps = folder.apps.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }
+        androidx.compose.ui.window.Dialog(onDismissRequest = { openFolder = null }) {
+            Column(
+                Modifier
+                    .width(300.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(theme.menuSurface)
+                    .border(1.dp, theme.stroke, RoundedCornerShape(10.dp))
+                    .padding(18.dp),
+            ) {
+                Text(folder.name, color = theme.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(12.dp))
+                if (folderApps.isEmpty()) {
+                    Text(
+                        "Empty. In All apps, long-press an app and choose \"Add to folder.\"",
+                        color = theme.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
+                    )
+                } else {
+                    Row(Modifier.fillMaxWidth()) {
+                        folderApps.forEach { app ->
+                            Box(Modifier.weight(1f)) {
+                                PinnedAppTile(
+                                    app = app, isDockPinned = false,
+                                    onClick = { openFolder = null; onLaunch(app) },
+                                    onUnpin = {}, onToggleDockPin = {},
+                                )
+                            }
+                        }
+                        repeat(StartFolders.CAPACITY - folderApps.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RecentAppSection(
+    title: String,
+    apps: List<InstalledApp>,
+    onSeeMore: () -> Unit,
+    perRow: Int,
+    onLaunch: (InstalledApp) -> Unit,
+) {
+    if (apps.isEmpty()) return
+    val theme = LocalLauncherTheme.current
+    Spacer(Modifier.height(12.dp))
+    SectionHeader(title, "See more", onSeeMore)
+    Spacer(Modifier.height(6.dp))
+    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+        apps.take(perRow).forEach { app ->
+            Box(Modifier.weight(1f)) {
+                PinnedAppTile(
+                    app = app, isDockPinned = false,
+                    onClick = { onLaunch(app) }, onUnpin = {}, onToggleDockPin = {},
+                )
+            }
+        }
+        repeat(perRow - apps.take(perRow).size) { Spacer(Modifier.weight(1f)) }
+    }
+}
+
+@Composable
+private fun RecentFileSection(
+    title: String,
+    files: List<RecentFile>,
+    onSeeMore: () -> Unit,
+    perRow: Int,
+    onOpen: (File) -> Unit,
+) {
+    if (files.isEmpty()) return
+    Spacer(Modifier.height(12.dp))
+    SectionHeader(title, "See more", onSeeMore)
+    Spacer(Modifier.height(6.dp))
+    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+        files.take(perRow).forEach { rf ->
+            Box(Modifier.weight(1f)) {
+                MiniFileTile(rf) { onOpen(rf.file) }
+            }
+        }
+        repeat(perRow - files.take(perRow).size) { Spacer(Modifier.weight(1f)) }
+    }
+}
+
+@Composable
+private fun MiniFileTile(rf: RecentFile, onClick: () -> Unit) {
+    val theme = LocalLauncherTheme.current
+    Column(
+        Modifier.clip(RoundedCornerShape(4.dp)).clickable { onClick() }.padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Outlined.Description, null, Modifier.size(30.dp), tint = theme.accent)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            rf.name, color = theme.text, fontSize = 10.sp, maxLines = 1,
+            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun FolderTile(folder: StartFolder, apps: List<InstalledApp>, onClick: () -> Unit) {
+    val theme = LocalLauncherTheme.current
+    val icons = folder.apps.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg }?.icon }
+    Column(
+        Modifier.clip(RoundedCornerShape(6.dp)).clickable { onClick() }.padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(38.dp).clip(RoundedCornerShape(9.dp)).background(theme.card),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (icons.isEmpty()) {
+                Icon(Icons.Filled.Folder, null, Modifier.size(22.dp), tint = Color(0xFFFFCA28))
+            } else {
+                // 2x2 mini grid of the folder's app icons
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    icons.chunked(2).take(2).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            row.forEach { ic ->
+                                Image(bitmap = ic, contentDescription = null, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            folder.name, color = theme.text, fontSize = 11.sp, maxLines = 1,
+            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -636,44 +843,20 @@ private fun ContextMenuItem(
     }
 }
 
-@Composable
-private fun RecommendedTile(file: File, onClick: () -> Unit) {
-    val theme = LocalLauncherTheme.current
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Outlined.Description, null, Modifier.size(26.dp),
-            tint = theme.accent,
-        )
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(
-                file.name, color = theme.text, fontSize = 12.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(file.lastModified())),
-                color = theme.textSecondary, fontSize = 10.sp,
-            )
-        }
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AllAppsView(
     apps: List<InstalledApp>,
     pins: List<String>,
     dockPins: List<String>,
+    folders: List<StartFolder>,
     onBack: () -> Unit,
     onLaunch: (InstalledApp) -> Unit,
     onTogglePin: (String) -> Unit,
     onToggleDockPin: (String) -> Unit,
+    onAddToDesktop: (InstalledApp) -> Unit,
+    onAddToFolder: (String, Int) -> Unit,
+    onUninstall: (String) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
@@ -695,6 +878,7 @@ private fun AllAppsView(
                 }
                 items(letterApps, key = { it.packageName }) { app ->
                     var menuOpen by remember(app.packageName) { mutableStateOf(false) }
+                    var folderChooser by remember(app.packageName) { mutableStateOf(false) }
                     val isPinned = pins.contains(app.packageName)
                     Box {
                         Row(
@@ -728,24 +912,57 @@ private fun AllAppsView(
                         }
                         DropdownMenu(
                             expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
+                            onDismissRequest = { menuOpen = false; folderChooser = false },
                             shape = RoundedCornerShape(8.dp),
                             containerColor = theme.menuSurface,
                         ) {
-                            ContextMenuItem(
-                                Icons.Outlined.PushPin,
-                                if (isPinned) "Unpin from Start" else "Pin to Start",
-                            ) {
-                                menuOpen = false
-                                onTogglePin(app.packageName)
-                            }
-                            ContextMenuItem(
-                                Icons.Outlined.PushPin,
-                                if (dockPins.contains(app.packageName)) "Unpin from taskbar"
-                                else "Pin to taskbar",
-                            ) {
-                                menuOpen = false
-                                onToggleDockPin(app.packageName)
+                            if (!folderChooser) {
+                                ContextMenuItem(
+                                    Icons.Outlined.PushPin,
+                                    if (isPinned) "Unpin from Start" else "Pin to Start",
+                                ) {
+                                    menuOpen = false
+                                    onTogglePin(app.packageName)
+                                }
+                                ContextMenuItem(
+                                    Icons.Outlined.PushPin,
+                                    if (dockPins.contains(app.packageName)) "Unpin from taskbar"
+                                    else "Pin to taskbar",
+                                ) {
+                                    menuOpen = false
+                                    onToggleDockPin(app.packageName)
+                                }
+                                ContextMenuItem(
+                                    Icons.Outlined.AddToHomeScreen,
+                                    "Create desktop shortcut",
+                                ) {
+                                    menuOpen = false
+                                    onAddToDesktop(app)
+                                }
+                                ContextMenuItem(
+                                    Icons.Filled.Folder,
+                                    "Add to folder",
+                                ) {
+                                    folderChooser = true
+                                }
+                                ContextMenuItem(
+                                    Icons.Outlined.Delete,
+                                    "Uninstall",
+                                ) {
+                                    menuOpen = false
+                                    onUninstall(app.packageName)
+                                }
+                            } else {
+                                folders.forEachIndexed { index, folder ->
+                                    ContextMenuItem(
+                                        Icons.Filled.Folder,
+                                        folder.name,
+                                    ) {
+                                        menuOpen = false
+                                        folderChooser = false
+                                        onAddToFolder(app.packageName, index)
+                                    }
+                                }
                             }
                         }
                     }
@@ -825,14 +1042,3 @@ private fun deviceUserName(context: Context): String =
         ?.takeIf { it.isNotBlank() }
         ?: Build.MODEL
 
-private fun loadRecentFiles(): List<File> = runCatching {
-    listOf(
-        Environment.DIRECTORY_DOWNLOADS, Environment.DIRECTORY_DOCUMENTS,
-        Environment.DIRECTORY_PICTURES, Environment.DIRECTORY_DCIM,
-    )
-        .map { Environment.getExternalStoragePublicDirectory(it) }
-        .flatMap { it.listFiles()?.toList() ?: emptyList() }
-        .filter { it.isFile && !it.name.startsWith(".") }
-        .sortedByDescending { it.lastModified() }
-        .take(6)
-}.getOrDefault(emptyList())

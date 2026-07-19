@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
@@ -155,6 +157,37 @@ fun Taskbar(
         }
     }
 
+    // "Quick apps" taskbar folder (up to 6), shared via DataStore
+    val quickAppsJson by AppSettings.quickAppsFlow(context).collectAsState(initial = "[]")
+    val quickPkgs = remember(quickAppsJson) {
+        runCatching {
+            val arr = JSONArray(quickAppsJson)
+            List(arr.length()) { arr.getString(it) }
+        }.getOrDefault(emptyList())
+    }
+    var quickApps by remember { mutableStateOf<List<TaskbarApp>>(emptyList()) }
+    LaunchedEffect(quickPkgs, iconPack) {
+        quickApps = withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            quickPkgs.mapNotNull { pkg ->
+                runCatching {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    TaskbarApp(
+                        packageName = pkg,
+                        label = pm.getApplicationLabel(info).toString(),
+                        icon = InstalledAppsRepository.loadIcon(context, iconPack, pkg)?.asImageBitmap(),
+                    )
+                }.getOrNull()
+            }
+        }
+    }
+
+    fun removeQuick(pkg: String) {
+        scope.launch {
+            AppSettings.setQuickApps(context, JSONArray(quickPkgs - pkg).toString())
+        }
+    }
+
     Column(modifier.background(theme.taskbar)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(theme.stroke))
         Row(
@@ -164,7 +197,8 @@ fun Taskbar(
             // App cluster, centered in the space before the tray, capped so
             // it can never spill under the tray
             BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
-                val budget = ((maxWidth / 46.dp).toInt() - 3).coerceAtLeast(1)
+                // Reserve slots for Start, Search, Task View, and Quick apps
+                val budget = ((maxWidth / 46.dp).toInt() - 4).coerceAtLeast(1)
                 val windowsShown = openWindows.take(minOf(3, budget))
                 val pinsShown = pinnedApps.take((budget - windowsShown.size).coerceAtLeast(0))
                 Row(
@@ -195,6 +229,11 @@ fun Taskbar(
                     TaskbarButton(onClick = onTaskViewClick) {
                         TaskViewGlyph(theme.text)
                     }
+                    QuickAppsFolder(
+                        apps = quickApps,
+                        onLaunch = { InstalledAppsRepository.launch(context, it) },
+                        onRemove = { removeQuick(it) },
+                    )
                     pinsShown.forEach { app ->
                         PinnedTaskbarButton(
                             app = app,
@@ -316,6 +355,102 @@ private fun PinnedTaskbarButton(
                 Icon(Icons.Outlined.PushPin, null, Modifier.size(15.dp), tint = theme.text)
                 Spacer(Modifier.width(10.dp))
                 Text("Unpin from taskbar", color = theme.text, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+// Taskbar "Quick apps" folder: a folder tile that opens a small popup grid of
+// up to 6 apps. Tap an app to launch it; long-press to remove it.
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickAppsFolder(
+    apps: List<TaskbarApp>,
+    onLaunch: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .clickable { open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            val icons = apps.mapNotNull { it.icon }
+            if (icons.isEmpty()) {
+                Icon(Icons.Filled.Folder, "Quick apps", Modifier.size(22.dp), tint = Color(0xFFFFCA28))
+            } else {
+                // 2x2 mini grid of the first few app icons on a rounded card
+                Box(
+                    Modifier.size(30.dp).clip(RoundedCornerShape(7.dp)).background(theme.card),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        icons.take(4).chunked(2).forEach { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                row.forEach { ic ->
+                                    Image(bitmap = ic, contentDescription = null, modifier = Modifier.size(11.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(8.dp),
+            containerColor = theme.menuSurface,
+        ) {
+            Column(Modifier.padding(10.dp)) {
+                Text("Quick apps", color = theme.text, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                if (apps.isEmpty()) {
+                    Text(
+                        "Empty. In the Start menu's All apps,\nlong-press an app → \"Add to Quick apps.\"",
+                        color = theme.textSecondary, fontSize = 11.sp, lineHeight = 15.sp,
+                    )
+                } else {
+                    apps.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            row.forEach { app ->
+                                Column(
+                                    Modifier
+                                        .width(64.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .combinedClickable(
+                                            onClick = { open = false; onLaunch(app.packageName) },
+                                            onLongClick = { onRemove(app.packageName) },
+                                        )
+                                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    if (app.icon != null) {
+                                        Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(30.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
+                                    } else {
+                                        Text(app.label.take(1).uppercase(), color = theme.text, fontSize = 14.sp)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        app.label, color = theme.text, fontSize = 10.sp, maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.RemoveCircleOutline, null, Modifier.size(12.dp), tint = theme.textSecondary)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Long-press an app to remove", color = theme.textSecondary, fontSize = 10.sp)
+                    }
+                }
             }
         }
     }

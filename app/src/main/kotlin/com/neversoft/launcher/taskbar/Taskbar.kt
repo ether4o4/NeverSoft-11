@@ -126,6 +126,13 @@ fun Taskbar(
 
     // Taskbar pins, shared with the Start menu via DataStore
     val iconPack by AppSettings.iconPackFlow(context).collectAsState(initial = "")
+    val iconOverridesJson by AppSettings.appIconOverridesFlow(context).collectAsState(initial = "{}")
+    val iconOverrides = remember(iconOverridesJson) {
+        runCatching {
+            val o = org.json.JSONObject(iconOverridesJson)
+            buildMap { o.keys().forEach { k -> put(k, o.optString(k)) } }
+        }.getOrDefault(emptyMap())
+    }
     val dockPinsJson by AppSettings.dockPinsFlow(context).collectAsState(initial = "[]")
     val pinnedPkgs = remember(dockPinsJson) {
         runCatching {
@@ -135,7 +142,7 @@ fun Taskbar(
     }
     // Resolve labels + icons off the main thread
     var pinnedApps by remember { mutableStateOf<List<TaskbarApp>>(emptyList()) }
-    LaunchedEffect(pinnedPkgs, iconPack) {
+    LaunchedEffect(pinnedPkgs, iconPack, iconOverrides) {
         pinnedApps = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             pinnedPkgs.mapNotNull { pkg ->
@@ -144,7 +151,7 @@ fun Taskbar(
                     TaskbarApp(
                         packageName = pkg,
                         label = pm.getApplicationLabel(info).toString(),
-                        icon = InstalledAppsRepository.loadIcon(context, iconPack, pkg)?.asImageBitmap(),
+                        icon = InstalledAppsRepository.loadIcon(context, iconPack, pkg, iconOverrides[pkg])?.asImageBitmap(),
                     )
                 }.getOrNull()
             }
@@ -166,7 +173,7 @@ fun Taskbar(
         }.getOrDefault(emptyList())
     }
     var quickApps by remember { mutableStateOf<List<TaskbarApp>>(emptyList()) }
-    LaunchedEffect(quickPkgs, iconPack) {
+    LaunchedEffect(quickPkgs, iconPack, iconOverrides) {
         quickApps = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             quickPkgs.mapNotNull { pkg ->
@@ -175,7 +182,7 @@ fun Taskbar(
                     TaskbarApp(
                         packageName = pkg,
                         label = pm.getApplicationLabel(info).toString(),
-                        icon = InstalledAppsRepository.loadIcon(context, iconPack, pkg)?.asImageBitmap(),
+                        icon = InstalledAppsRepository.loadIcon(context, iconPack, pkg, iconOverrides[pkg])?.asImageBitmap(),
                     )
                 }.getOrNull()
             }

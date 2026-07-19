@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Resources
 import android.graphics.Bitmap
-import androidx.core.graphics.drawable.toBitmap
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 
@@ -58,8 +57,28 @@ object IconPacks {
         val id = res.getIdentifier(drawableName, "drawable", packPkg)
         if (id == 0) return null
         return runCatching {
-            androidx.core.content.res.ResourcesCompat.getDrawable(res, id, null)?.toBitmap(168, 168)
+            androidx.core.content.res.ResourcesCompat.getDrawable(res, id, null)
+                ?.let { renderPadded(it, 168, ICON_CONTENT_FRACTION) }
         }.getOrNull()
+    }
+
+    // Icon-pack drawables are usually full-bleed (edge-to-edge) squares, which
+    // render larger than typical app icons (those carry transparent margin).
+    // Draw the pack icon inset on a transparent canvas so it sits inside the
+    // tile with the same visual weight instead of overflowing the app space.
+    private const val ICON_CONTENT_FRACTION = 0.82f
+
+    private fun renderPadded(
+        drawable: android.graphics.drawable.Drawable,
+        sizePx: Int,
+        contentFraction: Float,
+    ): Bitmap {
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        val inset = (sizePx * (1f - contentFraction) / 2f).toInt()
+        drawable.setBounds(inset, inset, sizePx - inset, sizePx - inset)
+        drawable.draw(canvas)
+        return bmp
     }
 
     private fun ensureLoaded(context: Context, packPkg: String) {

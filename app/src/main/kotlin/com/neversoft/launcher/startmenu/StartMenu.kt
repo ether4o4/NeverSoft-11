@@ -42,7 +42,9 @@ import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.PushPin
@@ -53,6 +55,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -264,6 +267,40 @@ fun StartMenu(
         }
     }
 
+    // Per-app custom icon: pick a photo for one app, or reset to default.
+    val iconOverridesJson by com.neversoft.launcher.data.AppSettings
+        .appIconOverridesFlow(context).collectAsState(initial = "{}")
+    val overriddenPkgs = remember(iconOverridesJson) {
+        runCatching {
+            val o = org.json.JSONObject(iconOverridesJson)
+            o.keys().asSequence().toSet()
+        }.getOrDefault(emptySet())
+    }
+    var iconTargetPkg by remember { mutableStateOf<String?>(null) }
+    val appIconPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        val pkg = iconTargetPkg
+        iconTargetPkg = null
+        if (uri != null && pkg != null) {
+            scope.launch {
+                val path = withContext(Dispatchers.IO) {
+                    ImageStore.importImage(context, uri, "appicon-$pkg")
+                }
+                if (path != null) {
+                    com.neversoft.launcher.data.AppSettings.setAppIcon(context, pkg, path)
+                    apps = InstalledAppsRepository.loadApps(context)
+                }
+            }
+        }
+    }
+    fun resetAppIcon(pkg: String) {
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.clearAppIcon(context, pkg)
+            apps = InstalledAppsRepository.loadApps(context)
+        }
+    }
+
     val searchEngine = remember {
         LauncherSearchEngine(
             listOf(AppSearchProvider { apps }, SettingsSearchProvider(), FileSearchProvider()),
@@ -402,6 +439,12 @@ fun StartMenu(
                         onAddToFolder = { pkg, idx -> addToFolder(pkg, idx) },
                         onUninstall = { pkg -> uninstall(pkg) },
                         onAddToQuickApps = { pkg -> addToQuickApps(pkg) },
+                        onChangeIcon = { pkg ->
+                            iconTargetPkg = pkg
+                            appIconPicker.launch("image/*")
+                        },
+                        onResetIcon = { pkg -> resetAppIcon(pkg) },
+                        hasCustomIcon = { pkg -> overriddenPkgs.contains(pkg) },
                     )
                     StartView.SEARCH -> SearchResultsView(
                         query = query, results = results, apps = apps,
@@ -1005,6 +1048,9 @@ private fun AllAppsView(
     onAddToFolder: (String, Int) -> Unit,
     onUninstall: (String) -> Unit,
     onAddToQuickApps: (String) -> Unit,
+    onChangeIcon: (String) -> Unit,
+    onResetIcon: (String) -> Unit,
+    hasCustomIcon: (String) -> Boolean,
 ) {
     val theme = LocalLauncherTheme.current
     Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
@@ -1093,6 +1139,22 @@ private fun AllAppsView(
                                 ) {
                                     menuOpen = false
                                     onAddToQuickApps(app.packageName)
+                                }
+                                ContextMenuItem(
+                                    Icons.Outlined.Image,
+                                    "Change icon",
+                                ) {
+                                    menuOpen = false
+                                    onChangeIcon(app.packageName)
+                                }
+                                if (hasCustomIcon(app.packageName)) {
+                                    ContextMenuItem(
+                                        Icons.Outlined.Refresh,
+                                        "Reset icon",
+                                    ) {
+                                        menuOpen = false
+                                        onResetIcon(app.packageName)
+                                    }
                                 }
                                 ContextMenuItem(
                                     Icons.Filled.Folder,

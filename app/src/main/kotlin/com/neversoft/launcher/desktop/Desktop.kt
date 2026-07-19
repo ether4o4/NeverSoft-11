@@ -184,11 +184,18 @@ fun Desktop(
     // App icons for shortcuts, honoring the active icon pack. Resolved off the
     // main thread so decoding never blocks the UI during a home transition.
     val iconPack by AppSettings.iconPackFlow(context).collectAsState(initial = "")
+    val iconOverridesJson by AppSettings.appIconOverridesFlow(context).collectAsState(initial = "{}")
+    val iconOverrides = remember(iconOverridesJson) {
+        runCatching {
+            val o = JSONObject(iconOverridesJson)
+            buildMap { o.keys().forEach { k -> put(k, o.optString(k)) } }
+        }.getOrDefault(emptyMap())
+    }
     var appIcons by remember { mutableStateOf(emptyMap<String, androidx.compose.ui.graphics.ImageBitmap>()) }
-    LaunchedEffect(items, iconPack) {
+    LaunchedEffect(items, iconPack, iconOverrides) {
         appIcons = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             items.filter { it.kind == "app" }.mapNotNull { item ->
-                InstalledAppsRepository.loadIcon(context, iconPack, item.pkg!!)
+                InstalledAppsRepository.loadIcon(context, iconPack, item.pkg!!, iconOverrides[item.pkg])
                     ?.let { item.id to it.asImageBitmap() }
             }.toMap()
         }

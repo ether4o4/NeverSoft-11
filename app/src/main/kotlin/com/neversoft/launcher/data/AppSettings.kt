@@ -25,6 +25,7 @@ object AppSettings {
     val KEY_START_FOLDERS             = stringPreferencesKey("start_folders")
     val KEY_RECENT_OPENED_FILES       = stringPreferencesKey("recent_opened_files")
     val KEY_QUICK_APPS                = stringPreferencesKey("quick_apps")
+    val KEY_APP_ICON_OVERRIDES        = stringPreferencesKey("app_icon_overrides")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -96,6 +97,28 @@ object AppSettings {
 
     suspend fun setStartFolders(context: Context, json: String) =
         context.dataStore.edit { it[KEY_START_FOLDERS] = json }
+
+    // Per-app custom icons: JSON object {packageName: imagePath} ("{}" = none)
+    fun appIconOverridesFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_APP_ICON_OVERRIDES] ?: "{}" }
+
+    suspend fun setAppIcon(context: Context, pkg: String, path: String) {
+        context.dataStore.edit { prefs ->
+            val obj = runCatching { org.json.JSONObject(prefs[KEY_APP_ICON_OVERRIDES] ?: "{}") }
+                .getOrDefault(org.json.JSONObject())
+            obj.put(pkg, path)
+            prefs[KEY_APP_ICON_OVERRIDES] = obj.toString()
+        }
+    }
+
+    suspend fun clearAppIcon(context: Context, pkg: String) {
+        context.dataStore.edit { prefs ->
+            val obj = runCatching { org.json.JSONObject(prefs[KEY_APP_ICON_OVERRIDES] ?: "{}") }
+                .getOrDefault(org.json.JSONObject())
+            obj.remove(pkg)
+            prefs[KEY_APP_ICON_OVERRIDES] = obj.toString()
+        }
+    }
 
     // Taskbar "Quick apps" folder: JSON array of package names (max 6)
     fun quickAppsFlow(context: Context): Flow<String> =

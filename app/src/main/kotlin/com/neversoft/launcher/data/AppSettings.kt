@@ -24,6 +24,7 @@ object AppSettings {
     val KEY_CALENDAR_SIZE             = stringPreferencesKey("calendar_size")
     val KEY_START_FOLDERS             = stringPreferencesKey("start_folders")
     val KEY_RECENT_OPENED_FILES       = stringPreferencesKey("recent_opened_files")
+    val KEY_QUICK_APPS                = stringPreferencesKey("quick_apps")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -95,6 +96,13 @@ object AppSettings {
 
     suspend fun setStartFolders(context: Context, json: String) =
         context.dataStore.edit { it[KEY_START_FOLDERS] = json }
+
+    // Taskbar "Quick apps" folder: JSON array of package names (max 6)
+    fun quickAppsFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_QUICK_APPS] ?: "[]" }
+
+    suspend fun setQuickApps(context: Context, json: String) =
+        context.dataStore.edit { it[KEY_QUICK_APPS] = json }
 
     // Recently-opened file paths, most recent first (capped)
     fun recentOpenedFilesFlow(context: Context): Flow<String> =

@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -61,7 +63,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +77,7 @@ import androidx.compose.ui.unit.sp
 import com.neversoft.launcher.apps.InstalledApp
 import com.neversoft.launcher.apps.InstalledAppsRepository
 import com.neversoft.launcher.files.FileOpener
+import com.neversoft.launcher.files.ImageStore
 import com.neversoft.launcher.search.AppSearchProvider
 import com.neversoft.launcher.search.FileSearchProvider
 import com.neversoft.launcher.search.LauncherSearchEngine
@@ -79,8 +85,11 @@ import com.neversoft.launcher.search.ResultType
 import com.neversoft.launcher.search.SearchResult
 import com.neversoft.launcher.search.SettingsSearchProvider
 import com.neversoft.launcher.theme.LocalLauncherTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import java.io.File
 
 enum class PowerAction { LOCK, SLEEP, SHUT_DOWN, RESTART, SIGN_OUT }
@@ -207,6 +216,54 @@ fun StartMenu(
         }
     }
 
+    fun renameFolder(index: Int, rawName: String) {
+        val name = rawName.trim().ifEmpty { return }
+        val updated = folders.mapIndexed { i, f -> if (i == index) f.copy(name = name) else f }
+        folders = updated
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setStartFolders(context, StartFolders.serialize(updated))
+        }
+    }
+
+    fun setFolderImage(index: Int, path: String) {
+        val updated = folders.mapIndexed { i, f -> if (i == index) f.copy(image = path) else f }
+        folders = updated
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setStartFolders(context, StartFolders.serialize(updated))
+        }
+    }
+
+    // Photo picker for a Start-menu folder; the target folder is captured just
+    // before launching so the callback knows which one to update.
+    var photoTargetFolder by remember { mutableStateOf<Int?>(null) }
+    val folderPhotoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        val idx = photoTargetFolder
+        photoTargetFolder = null
+        if (uri != null && idx != null) {
+            scope.launch {
+                val path = withContext(Dispatchers.IO) {
+                    ImageStore.importImage(context, uri, "startfolder$idx")
+                }
+                if (path != null) setFolderImage(idx, path)
+            }
+        }
+    }
+
+    fun addToQuickApps(pkg: String) {
+        scope.launch {
+            val current = runCatching {
+                val arr = JSONArray(com.neversoft.launcher.data.AppSettings.quickAppsFlow(context).first())
+                List(arr.length()) { arr.getString(it) }
+            }.getOrDefault(emptyList())
+            if (!current.contains(pkg)) {
+                val updated = (current + pkg).take(6)
+                com.neversoft.launcher.data.AppSettings.setQuickApps(context, JSONArray(updated).toString())
+            }
+        }
+    }
+
     val searchEngine = remember {
         LauncherSearchEngine(
             listOf(AppSearchProvider { apps }, SettingsSearchProvider(), FileSearchProvider()),
@@ -320,6 +377,12 @@ fun StartMenu(
                             onDismiss()
                         },
                         onOpenFileExplorer = onOpenFileExplorer,
+                        onRenameFolder = { idx, name -> renameFolder(idx, name) },
+                        onPickFolderPhoto = { idx ->
+                            photoTargetFolder = idx
+                            folderPhotoPicker.launch("image/*")
+                        },
+                        onRemoveFolderPhoto = { idx -> setFolderImage(idx, "") },
                     )
                     StartView.ALL_APPS -> AllAppsView(
                         apps = apps,
@@ -338,6 +401,7 @@ fun StartMenu(
                         onAddToDesktop = { app -> addToDesktop(app) },
                         onAddToFolder = { pkg, idx -> addToFolder(pkg, idx) },
                         onUninstall = { pkg -> uninstall(pkg) },
+                        onAddToQuickApps = { pkg -> addToQuickApps(pkg) },
                     )
                     StartView.SEARCH -> SearchResultsView(
                         query = query, results = results, apps = apps,
@@ -551,6 +615,9 @@ private fun PinnedView(
     onToggleDockPin: (String) -> Unit,
     onOpenFile: (File) -> Unit,
     onOpenFileExplorer: () -> Unit,
+    onRenameFolder: (Int, String) -> Unit,
+    onPickFolderPhoto: (Int) -> Unit,
+    onRemoveFolderPhoto: (Int) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
@@ -562,6 +629,8 @@ private fun PinnedView(
     var recentlyInstalled by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     var recentlyOpened by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
     var recentlyAdded by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
+    var recentFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
+    var recentlyUsed by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
     LaunchedEffect(apps) {
         if (apps.isNotEmpty()) {
             recentApps = StartData.recentApps(context, apps, perRow)
@@ -569,6 +638,8 @@ private fun PinnedView(
         }
         recentlyOpened = StartData.recentlyOpenedFiles(context, perRow)
         recentlyAdded = StartData.recentlyAddedFiles(perRow)
+        recentFiles = StartData.recentFilesByDateAdded(context, perRow)
+        recentlyUsed = StartData.recentlyUsedFiles(context, perRow)
     }
 
     var openFolder by remember { mutableStateOf<Int?>(null) }
@@ -619,11 +690,15 @@ private fun PinnedView(
         RecentFileSection("Recently opened", recentlyOpened, onSeeMore = onOpenFileExplorer, perRow = perRow, onOpen = onOpenFile)
         // ——— Recently added files ———
         RecentFileSection("Recently added", recentlyAdded, onSeeMore = onOpenFileExplorer, perRow = perRow, onOpen = onOpenFile)
+        // ——— Recent files (device-wide, by date added) ———
+        RecentFileSection("Recent files", recentFiles, onSeeMore = onOpenFileExplorer, perRow = perRow, onOpen = onOpenFile)
+        // ——— Recently used files (device-wide, by date modified) ———
+        RecentFileSection("Recently used files", recentlyUsed, onSeeMore = onOpenFileExplorer, perRow = perRow, onOpen = onOpenFile)
         // ——— Recently installed apps ———
         RecentAppSection("Recently installed", recentlyInstalled, onSeeMore = onAllApps, perRow = perRow, onLaunch = onLaunch)
     }
 
-    // Folder contents dialog
+    // Folder contents dialog (with rename + custom photo)
     openFolder?.let { idx ->
         val folder = folders.getOrNull(idx) ?: return@let
         val folderApps = folder.apps.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }
@@ -636,8 +711,45 @@ private fun PinnedView(
                     .border(1.dp, theme.stroke, RoundedCornerShape(10.dp))
                     .padding(18.dp),
             ) {
-                Text(folder.name, color = theme.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                // Editable name
+                var editName by remember(folder.name) { mutableStateOf(folder.name) }
+                Text("Folder name", color = theme.textSecondary, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(theme.inputField)
+                            .border(1.dp, theme.stroke, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    ) {
+                        BasicTextField(
+                            value = editName,
+                            onValueChange = { editName = it },
+                            singleLine = true,
+                            textStyle = TextStyle(color = theme.text, fontSize = 13.sp),
+                            cursorBrush = SolidColor(theme.accent),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    ChipButton("Save") { onRenameFolder(idx, editName) }
+                }
+
                 Spacer(Modifier.height(12.dp))
+                Text("Folder photo", color = theme.textSecondary, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChipButton("Choose photo") { onPickFolderPhoto(idx) }
+                    if (folder.image.isNotEmpty()) {
+                        ChipButton("Remove") { onRemoveFolderPhoto(idx) }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+                Text("Apps", color = theme.textSecondary, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
                 if (folderApps.isEmpty()) {
                     Text(
                         "Empty. In All apps, long-press an app and choose \"Add to folder.\"",
@@ -659,6 +771,21 @@ private fun PinnedView(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ChipButton(label: String, onClick: () -> Unit) {
+    val theme = LocalLauncherTheme.current
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(theme.card)
+            .border(1.dp, theme.stroke, RoundedCornerShape(4.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(label, color = theme.text, fontSize = 12.sp)
     }
 }
 
@@ -730,7 +857,19 @@ private fun MiniFileTile(rf: RecentFile, onClick: () -> Unit) {
 @Composable
 private fun FolderTile(folder: StartFolder, apps: List<InstalledApp>, onClick: () -> Unit) {
     val theme = LocalLauncherTheme.current
+    val context = LocalContext.current
     val icons = folder.apps.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg }?.icon }
+
+    // Decode a custom folder photo off the main thread, if set
+    var photo by remember(folder.image) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(folder.image) {
+        photo = if (folder.image.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                ImageStore.decodeSampled(folder.image, 128)?.asImageBitmap()
+            }
+        } else null
+    }
+
     Column(
         Modifier.clip(RoundedCornerShape(6.dp)).clickable { onClick() }.padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -739,15 +878,23 @@ private fun FolderTile(folder: StartFolder, apps: List<InstalledApp>, onClick: (
             Modifier.size(38.dp).clip(RoundedCornerShape(9.dp)).background(theme.card),
             contentAlignment = Alignment.Center,
         ) {
-            if (icons.isEmpty()) {
-                Icon(Icons.Filled.Folder, null, Modifier.size(22.dp), tint = Color(0xFFFFCA28))
-            } else {
-                // 2x2 mini grid of the folder's app icons
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    icons.chunked(2).take(2).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            row.forEach { ic ->
-                                Image(bitmap = ic, contentDescription = null, modifier = Modifier.size(14.dp))
+            val pic = photo
+            when {
+                pic != null -> Image(
+                    bitmap = pic, contentDescription = null,
+                    modifier = Modifier.size(38.dp).clip(RoundedCornerShape(9.dp)),
+                    contentScale = ContentScale.Crop,
+                    filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
+                )
+                icons.isEmpty() -> Icon(Icons.Filled.Folder, null, Modifier.size(22.dp), tint = Color(0xFFFFCA28))
+                else -> {
+                    // 2x2 mini grid of the folder's app icons
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        icons.chunked(2).take(2).forEach { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                row.forEach { ic ->
+                                    Image(bitmap = ic, contentDescription = null, modifier = Modifier.size(14.dp))
+                                }
                             }
                         }
                     }
@@ -857,6 +1004,7 @@ private fun AllAppsView(
     onAddToDesktop: (InstalledApp) -> Unit,
     onAddToFolder: (String, Int) -> Unit,
     onUninstall: (String) -> Unit,
+    onAddToQuickApps: (String) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
@@ -938,6 +1086,13 @@ private fun AllAppsView(
                                 ) {
                                     menuOpen = false
                                     onAddToDesktop(app)
+                                }
+                                ContextMenuItem(
+                                    Icons.Filled.Folder,
+                                    "Add to Quick apps",
+                                ) {
+                                    menuOpen = false
+                                    onAddToQuickApps(app.packageName)
                                 }
                                 ContextMenuItem(
                                     Icons.Filled.Folder,

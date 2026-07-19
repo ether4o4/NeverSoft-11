@@ -3,6 +3,7 @@ package com.neversoft.launcher.startmenu
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.os.Environment
+import android.provider.MediaStore
 import com.neversoft.launcher.apps.InstalledApp
 import com.neversoft.launcher.apps.InstalledAppsRepository
 import com.neversoft.launcher.data.AppSettings
@@ -72,6 +73,46 @@ object StartData {
                 .map { RecentFile(it, it.name) }
         }
 
+    // Device-wide files most recently ADDED to the phone (MediaStore).
+    suspend fun recentFilesByDateAdded(context: Context, limit: Int): List<RecentFile> =
+        queryMediaFiles(context, MediaStore.Files.FileColumns.DATE_ADDED, limit)
+
+    // Device-wide files most recently MODIFIED/used (MediaStore).
+    suspend fun recentlyUsedFiles(context: Context, limit: Int): List<RecentFile> =
+        queryMediaFiles(context, MediaStore.Files.FileColumns.DATE_MODIFIED, limit)
+
+    private suspend fun queryMediaFiles(
+        context: Context,
+        sortColumn: String,
+        limit: Int,
+    ): List<RecentFile> = withContext(Dispatchers.IO) {
+        val out = mutableListOf<RecentFile>()
+        runCatching {
+            val uri = MediaStore.Files.getContentUri("external")
+            val projection = arrayOf(
+                MediaStore.Files.FileColumns.DISPLAY_NAME,
+                MediaStore.Files.FileColumns.DATA,
+            )
+            // Only real files (directories have a null MIME type)
+            val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} IS NOT NULL"
+            context.contentResolver.query(uri, projection, selection, null, "$sortColumn DESC")
+                ?.use { c ->
+                    val dataIdx = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+                    val nameIdx = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                    val seen = HashSet<String>()
+                    while (c.moveToNext() && out.size < limit) {
+                        val path = c.getString(dataIdx) ?: continue
+                        if (!seen.add(path)) continue
+                        val f = File(path)
+                        if (f.isFile && !f.name.startsWith(".")) {
+                            out.add(RecentFile(f, c.getString(nameIdx) ?: f.name))
+                        }
+                    }
+                }
+        }
+        out
+    }
+
     // Convenience: fully load the app list then a recent slice.
     suspend fun loadApps(context: Context) = InstalledAppsRepository.loadApps(context)
 
@@ -87,8 +128,9 @@ object StartData {
     }
 }
 
-// One Start-menu folder: a name and up to 4 app package names.
-data class StartFolder(val name: String, val apps: List<String>)
+// One Start-menu folder: a name, up to 4 app package names, and an optional
+// custom photo (a stored image path; "" = default folder/mini-grid icon).
+data class StartFolder(val name: String, val apps: List<String>, val image: String = "")
 
 object StartFolders {
     const val COUNT = 4
@@ -103,6 +145,7 @@ object StartFolders {
                 StartFolder(
                     name = o.optString("name", "Folder ${i + 1}"),
                     apps = (0 until appsArr.length()).map { appsArr.getString(it) }.take(CAPACITY),
+                    image = o.optString("image", ""),
                 )
             }
         }.getOrDefault(emptyList())
@@ -118,6 +161,7 @@ object StartFolders {
             val o = org.json.JSONObject()
             o.put("name", f.name)
             o.put("apps", JSONArray(f.apps))
+            o.put("image", f.image)
             arr.put(o)
         }
         return arr.toString()

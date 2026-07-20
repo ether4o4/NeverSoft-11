@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.Color
 
 // Shared shell theme: the taskbar, Start menu, flyouts, and every window
 // read the same token set, so a preset recolors the whole OS at once.
-enum class ThemePreset { DARK, LIGHT, MACBOOK, GLASS, METALLIC }
+enum class ThemePreset { DARK, LIGHT, MACBOOK, GLASS, METALLIC, NEV7 }
 
 data class LauncherTheme(
     val preset: ThemePreset,
@@ -70,24 +70,25 @@ object LauncherThemes {
         hover = Color(0x0D000000),
     )
 
-    // Warm silver surfaces with the Apple-blue accent
+    // Authentic macOS: frosted near-white menubar/dock, #F5F5F7 window gray,
+    // SF-blue accent — plus mac traffic-light window controls (see chrome).
     val MacBook = LauncherTheme(
         preset = ThemePreset.MACBOOK,
         displayName = "MacBook",
         isDark = false,
-        accent = Color(0xFF0071E3),
+        accent = Color(0xFF007AFF),
         accentText = Color(0xFFFFFFFF),
-        taskbar = Color(0xF0ECECF1),
-        menuSurface = Color(0xF5F0F0F5),
-        windowSurface = Color(0xFFECECF1),
-        card = Color(0xFFF8F8FB),
-        cardPressed = Color(0xFFE2E2E9),
+        taskbar = Color(0xD9F6F6F9),      // translucent frosted dock/menubar
+        menuSurface = Color(0xECF5F5F7),
+        windowSurface = Color(0xFFF5F5F7),
+        card = Color(0xFFFFFFFF),
+        cardPressed = Color(0xFFE8E8ED),
         inputField = Color(0xFFFFFFFF),
-        stroke = Color(0x14000000),
-        divider = Color(0x12000000),
-        text = Color(0xE6000000),
-        textSecondary = Color(0x99000000),
-        textDisabled = Color(0x59000000),
+        stroke = Color(0x1A000000),
+        divider = Color(0x14000000),
+        text = Color(0xD9000000),
+        textSecondary = Color(0x8C000000),
+        textDisabled = Color(0x4D000000),
         hover = Color(0x0D000000),
     )
 
@@ -133,7 +134,29 @@ object LauncherThemes {
         hover = Color(0x14000000),
     )
 
-    val all = listOf(Dark, Light, MacBook, Glass, Metallic)
+    // Authentic Windows 7 Aero, NeverSoft-style: deep glassy blue taskbar,
+    // translucent Aero borders, warm light window bodies, Aero-blue accent.
+    val Nev7 = LauncherTheme(
+        preset = ThemePreset.NEV7,
+        displayName = "Nev 7",
+        isDark = true, // dark glass chrome over the classic blue backdrop
+        accent = Color(0xFF3399E8),
+        accentText = Color(0xFFFFFFFF),
+        taskbar = Color(0xCC0B2B4E),      // Aero glass bar: translucent deep blue
+        menuSurface = Color(0xE0123C66),  // glassy Start menu
+        windowSurface = Color(0xFF15406D),
+        card = Color(0x2EFFFFFF),
+        cardPressed = Color(0x47FFFFFF),
+        inputField = Color(0x30FFFFFF),
+        stroke = Color(0x59A8D4F0),       // Aero's glowing glass edge
+        divider = Color(0x33A8D4F0),
+        text = Color(0xFFFFFFFF),
+        textSecondary = Color(0xC9E4F2FC),
+        textDisabled = Color(0x66FFFFFF),
+        hover = Color(0x1FFFFFFF),
+    )
+
+    val all = listOf(Dark, Light, MacBook, Glass, Metallic, Nev7)
 
     fun fromPreset(preset: ThemePreset): LauncherTheme = all.first { it.preset == preset }
 }

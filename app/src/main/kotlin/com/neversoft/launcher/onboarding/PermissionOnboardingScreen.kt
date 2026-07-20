@@ -87,7 +87,7 @@ fun PermissionOnboardingScreen(
     }
 
     Box(modifier.fillMaxSize()) {
-        BloomWallpaper(isDark = theme.isDark, modifier = Modifier.fillMaxSize())
+        BloomWallpaper(isDark = theme.isDark, accent = theme.accent, modifier = Modifier.fillMaxSize())
 
         Column(
             Modifier

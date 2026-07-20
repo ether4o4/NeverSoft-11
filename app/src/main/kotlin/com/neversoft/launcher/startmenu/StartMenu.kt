@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.Folder
@@ -312,6 +313,8 @@ fun StartMenu(
         }
     }
 
+    var addAppsOpen by remember { mutableStateOf(false) }
+
     // Per-app Start-menu pinned-tile sizes (1..5), on the Start menu's own scale
     val startIconSizesJson by com.neversoft.launcher.data.AppSettings
         .startIconSizesFlow(context).collectAsState(initial = "{}")
@@ -456,6 +459,7 @@ fun StartMenu(
                         onRemoveFolderPhoto = { idx -> setFolderImage(idx, "") },
                         startIconSizes = startIconSizes,
                         onSetStartIconSize = { pkg, level -> setStartIconSize(pkg, level) },
+                        onAddApps = { addAppsOpen = true },
                     )
                     StartView.ALL_APPS -> AllAppsView(
                         apps = apps,
@@ -549,6 +553,16 @@ fun StartMenu(
                     )
                 }
             }
+        }
+
+        // Multi-select "Add apps" -> pin to Start
+        if (addAppsOpen) {
+            com.neversoft.launcher.apps.AppPickerDialog(
+                title = "Add apps to Start",
+                apps = apps,
+                onConfirm = { pkgs -> setPins((pins + pkgs).distinct()) },
+                onDismiss = { addAppsOpen = false },
+            )
         }
 
         // Power flyout
@@ -655,6 +669,27 @@ private fun PowerMenuItem(
 }
 
 @Composable
+private fun HeaderChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(theme.card)
+            .border(1.dp, theme.stroke, RoundedCornerShape(4.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = theme.text, fontSize = 11.sp)
+        Icon(icon, null, Modifier.size(13.dp), tint = theme.textSecondary)
+    }
+}
+
+@Composable
 private fun SectionHeader(title: String, actionLabel: String?, onAction: (() -> Unit)?) {
     val theme = LocalLauncherTheme.current
     Row(
@@ -700,6 +735,7 @@ private fun PinnedView(
     onRemoveFolderPhoto: (Int) -> Unit,
     startIconSizes: Map<String, Int>,
     onSetStartIconSize: (String, Int) -> Unit,
+    onAddApps: () -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
@@ -733,7 +769,16 @@ private fun PinnedView(
             .padding(bottom = 12.dp),
     ) {
         // ——— Pinned: resizable apps (wrap to fit) + a row of 4 folders ———
-        SectionHeader("Pinned", "All apps", onAllApps)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Pinned", color = theme.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            HeaderChip("Add apps", Icons.Outlined.Add, onAddApps)
+            Spacer(Modifier.width(8.dp))
+            HeaderChip("All apps", Icons.Outlined.ChevronRight, onAllApps)
+        }
         Spacer(Modifier.height(10.dp))
         if (pinnedApps.isEmpty()) {
             Text(

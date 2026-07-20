@@ -8,6 +8,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -195,6 +197,19 @@ fun Taskbar(
         }
     }
 
+    // Long-press the taskbar to pick apps to pin to it
+    var addAppsOpen by remember { mutableStateOf(false) }
+    var pickerApps by remember { mutableStateOf<List<com.neversoft.launcher.apps.InstalledApp>>(emptyList()) }
+    fun openTaskbarPicker() {
+        addAppsOpen = true
+        scope.launch { pickerApps = InstalledAppsRepository.loadApps(context) }
+    }
+    fun addToTaskbar(pkgs: List<String>) {
+        scope.launch {
+            AppSettings.setDockPins(context, JSONArray((pinnedPkgs + pkgs).distinct()).toString())
+        }
+    }
+
     Column(modifier.background(theme.taskbar)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(theme.stroke))
         Row(
@@ -203,7 +218,13 @@ fun Taskbar(
         ) {
             // App cluster, centered in the space before the tray, capped so
             // it can never spill under the tray
-            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+            BoxWithConstraints(
+                Modifier.weight(1f).fillMaxHeight()
+                    // Long-press (click and hold) empty taskbar space to add apps
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { openTaskbarPicker() })
+                    },
+            ) {
                 // Reserve slots for Start, Search, Task View, and Quick apps
                 val budget = ((maxWidth / 46.dp).toInt() - 4).coerceAtLeast(1)
                 val windowsShown = openWindows.take(minOf(3, budget))
@@ -294,6 +315,16 @@ fun Taskbar(
         }
         // Extend the bar's background behind the gesture-nav area
         Box(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars))
+    }
+
+    // Multi-select "Add apps" -> pin to taskbar
+    if (addAppsOpen) {
+        com.neversoft.launcher.apps.AppPickerDialog(
+            title = "Add apps to taskbar",
+            apps = pickerApps,
+            onConfirm = { pkgs -> addToTaskbar(pkgs) },
+            onDismiss = { addAppsOpen = false },
+        )
     }
 }
 

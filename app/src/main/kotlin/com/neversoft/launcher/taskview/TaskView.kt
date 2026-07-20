@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,7 +41,8 @@ import com.neversoft.launcher.window.WindowContentType
 import com.neversoft.launcher.window.WindowState
 import com.neversoft.launcher.window.toIcon
 
-// Windows 11 Task View: window thumbnails over the dimmed desktop.
+// Windows 11 Task View: window thumbnails over the dimmed desktop, with the
+// desktop switcher (Desktop 1 / Work) along the bottom like on PC.
 @Composable
 fun TaskView(
     windows: List<ShellWindow>,
@@ -49,6 +51,9 @@ fun TaskView(
     onWindowClose: (String) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    currentDesktop: Int = 1,
+    onSwitchDesktop: (Int) -> Unit = {},
+    workLocked: Boolean = false,
 ) {
     val theme = LocalLauncherTheme.current
     Box(
@@ -80,6 +85,47 @@ fun TaskView(
                 }
             }
         }
+
+        // Desktop switcher, bottom-center (like Win11's Task View)
+        Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            DesktopCard("Desktop 1", selected = currentDesktop == 1, locked = false) {
+                onSwitchDesktop(1)
+            }
+            DesktopCard("Work", selected = currentDesktop == 2, locked = workLocked) {
+                onSwitchDesktop(2)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DesktopCard(label: String, selected: Boolean, locked: Boolean, onClick: () -> Unit) {
+    val theme = LocalLauncherTheme.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .size(width = 96.dp, height = 58.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(theme.windowSurface.copy(alpha = 0.85f))
+                .border(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) theme.accent else Color.White.copy(0.25f),
+                    shape = RoundedCornerShape(6.dp),
+                )
+                .clickable { onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (locked) {
+                Icon(Icons.Outlined.Lock, "Locked", Modifier.size(18.dp), tint = theme.textSecondary)
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(label, color = Color.White, fontSize = 11.sp)
     }
 }
 

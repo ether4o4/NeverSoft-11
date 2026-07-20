@@ -11,20 +11,32 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,10 +44,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.neversoft.launcher.apps.InstalledAppsRepository
 import com.neversoft.launcher.data.AppSettings
 import com.neversoft.launcher.desktop.Desktop
@@ -92,6 +111,10 @@ fun ShellScreen(
     var taskViewVisible by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
 
+    // Virtual desktops: 1 = main, 2 = "Work" (lockable like a secure folder)
+    var currentDesktop by remember { mutableStateOf(1) }
+    var workPinPrompt by remember { mutableStateOf<String?>(null) } // "enter" | "setup"
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
@@ -129,11 +152,23 @@ fun ShellScreen(
         )
         val effectiveCalendar = clampCalendar(calendarSize ?: defaultCalendar)
 
-        BloomWallpaper(isDark = theme.isDark, modifier = Modifier.fillMaxSize())
+        BloomWallpaper(isDark = theme.isDark, accent = theme.accent, modifier = Modifier.fillMaxSize())
+
+        // Work-profile PIN ("" = not locked)
+        val workPin by AppSettings.workPinFlow(context).collectAsState(initial = "")
+        fun requestDesktop(target: Int) {
+            when {
+                target == currentDesktop -> Unit
+                target == 2 && workPin.isEmpty() -> workPinPrompt = "setup"
+                target == 2 -> workPinPrompt = "enter"
+                else -> currentDesktop = 1
+            }
+        }
 
         Desktop(
             onOpenWindow = { type, title, param -> windowEngine.openWindow(type, title, param) },
             modifier = contentPadding,
+            page = currentDesktop,
         )
 
         ShellWindowHost(
@@ -160,6 +195,12 @@ fun ShellScreen(
                 onWindowClose = { id -> windowEngine.closeWindow(id) },
                 onDismiss = { taskViewVisible = false },
                 modifier = contentPadding,
+                currentDesktop = currentDesktop,
+                onSwitchDesktop = { target ->
+                    taskViewVisible = false
+                    requestDesktop(target)
+                },
+                workLocked = workPin.isNotEmpty(),
             )
         }
 
@@ -292,8 +333,115 @@ fun ShellScreen(
                 .fillMaxWidth(),
         )
 
+        // Work-profile PIN prompt: first entry offers to set a PIN (or skip);
+        // once set, entering Work always requires it — like a secure folder.
+        workPinPrompt?.let { mode ->
+            WorkPinDialog(
+                mode = mode,
+                onSubmit = { pin ->
+                    when (mode) {
+                        "setup" -> {
+                            if (pin.isNotEmpty()) scope.launch { AppSettings.setWorkPin(context, pin) }
+                            currentDesktop = 2
+                        }
+                        else -> if (pin == workPin) currentDesktop = 2
+                    }
+                    workPinPrompt = null
+                },
+                onDismiss = { workPinPrompt = null },
+            )
+        }
+
         if (locked) {
             LockScreen(onUnlock = { locked = false }, modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+
+// PIN dialog for the Work desktop. mode "setup": choose a PIN (or skip to
+// leave it unlocked); mode "enter": type the existing PIN to switch.
+@Composable
+private fun WorkPinDialog(
+    mode: String,
+    onSubmit: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
+    var pin by remember { mutableStateOf("") }
+    val shape = RoundedCornerShape(10.dp)
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .width(300.dp)
+                .clip(shape)
+                .background(theme.windowSurface)
+                .border(1.dp, theme.stroke, shape)
+                .padding(20.dp),
+        ) {
+            Text(
+                if (mode == "setup") "Lock the Work desktop?" else "Work desktop is locked",
+                color = theme.text, fontSize = 16.sp,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (mode == "setup")
+                    "Set a PIN to protect it like a secure folder, or skip to leave it open."
+                else "Enter your PIN to switch.",
+                color = theme.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(theme.inputField)
+                    .border(1.dp, theme.stroke, RoundedCornerShape(4.dp))
+                    .padding(horizontal = 10.dp, vertical = 9.dp),
+            ) {
+                BasicTextField(
+                    value = pin,
+                    onValueChange = { new -> pin = new.filter { it.isDigit() }.take(8) },
+                    singleLine = true,
+                    textStyle = TextStyle(color = theme.text, fontSize = 15.sp, letterSpacing = 4.sp),
+                    cursorBrush = SolidColor(theme.accent),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            Row {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(theme.accent)
+                        .clickable { onSubmit(pin) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (mode == "setup") "Set PIN" else "Unlock",
+                        color = theme.accentText, fontSize = 13.sp,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(theme.card)
+                        .border(1.dp, theme.stroke, RoundedCornerShape(4.dp))
+                        .clickable { if (mode == "setup") onSubmit("") else onDismiss() }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (mode == "setup") "Skip" else "Cancel",
+                        color = theme.text, fontSize = 13.sp,
+                    )
+                }
+            }
         }
     }
 }

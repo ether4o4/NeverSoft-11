@@ -27,6 +27,9 @@ object AppSettings {
     val KEY_QUICK_APPS                = stringPreferencesKey("quick_apps")
     val KEY_APP_ICON_OVERRIDES        = stringPreferencesKey("app_icon_overrides")
     val KEY_START_ICON_SIZES          = stringPreferencesKey("start_icon_sizes")
+    val KEY_DESKTOP_ITEMS_2           = stringPreferencesKey("desktop_items_2")
+    val KEY_DESKTOP_ICON_POSITIONS_2  = stringPreferencesKey("desktop_icon_positions_2")
+    val KEY_WORK_PIN                  = stringPreferencesKey("work_profile_pin")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -57,12 +60,24 @@ object AppSettings {
     suspend fun setWallpaperImage(context: Context, path: String) =
         context.dataStore.edit { it[KEY_LAUNCHER_WALLPAPER_IMAGE] = path }
 
-    // Desktop icons: "" = never seeded, otherwise a JSON array of items
-    fun desktopItemsFlow(context: Context): Flow<String> =
-        context.dataStore.data.map { it[KEY_DESKTOP_ITEMS] ?: "" }
+    // Desktop icons: "" = never seeded, otherwise a JSON array of items.
+    // Page 1 is the main desktop; page 2 is the "Work" desktop.
+    fun desktopItemsFlow(context: Context, page: Int = 1): Flow<String> =
+        context.dataStore.data.map {
+            it[if (page == 2) KEY_DESKTOP_ITEMS_2 else KEY_DESKTOP_ITEMS] ?: ""
+        }
 
-    suspend fun setDesktopItems(context: Context, json: String) =
-        context.dataStore.edit { it[KEY_DESKTOP_ITEMS] = json }
+    suspend fun setDesktopItems(context: Context, json: String, page: Int = 1) =
+        context.dataStore.edit {
+            it[if (page == 2) KEY_DESKTOP_ITEMS_2 else KEY_DESKTOP_ITEMS] = json
+        }
+
+    // Work-profile lock PIN ("" = not locked)
+    fun workPinFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_WORK_PIN] ?: "" }
+
+    suspend fun setWorkPin(context: Context, pin: String) =
+        context.dataStore.edit { it[KEY_WORK_PIN] = pin }
 
     // Selected icon pack package ("" = system icons)
     fun iconPackFlow(context: Context): Flow<String> =
@@ -173,9 +188,13 @@ object AppSettings {
     suspend fun setStartPins(context: Context, json: String) =
         context.dataStore.edit { it[KEY_LAUNCHER_START_PINS] = json }
 
-    fun desktopIconPositionsFlow(context: Context): Flow<String> =
-        context.dataStore.data.map { it[KEY_DESKTOP_ICON_POSITIONS] ?: "{}" }
+    fun desktopIconPositionsFlow(context: Context, page: Int = 1): Flow<String> =
+        context.dataStore.data.map {
+            it[if (page == 2) KEY_DESKTOP_ICON_POSITIONS_2 else KEY_DESKTOP_ICON_POSITIONS] ?: "{}"
+        }
 
-    suspend fun setDesktopIconPositions(context: Context, json: String) =
-        context.dataStore.edit { it[KEY_DESKTOP_ICON_POSITIONS] = json }
+    suspend fun setDesktopIconPositions(context: Context, json: String, page: Int = 1) =
+        context.dataStore.edit {
+            it[if (page == 2) KEY_DESKTOP_ICON_POSITIONS_2 else KEY_DESKTOP_ICON_POSITIONS] = json
+        }
 }

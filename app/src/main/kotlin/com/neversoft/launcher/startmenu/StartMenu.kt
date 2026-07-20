@@ -18,6 +18,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,7 +48,10 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.PhotoSizeSelectLarge
 import androidx.compose.material.icons.outlined.PowerSettingsNew
+import androidx.compose.material.icons.outlined.RadioButtonChecked
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
@@ -98,6 +104,11 @@ import java.io.File
 enum class PowerAction { LOCK, SLEEP, SHUT_DOWN, RESTART, SIGN_OUT }
 
 private enum class StartView { PINNED, ALL_APPS, SEARCH }
+
+// Five pinned-tile sizes as a fraction of the Start menu's own width (its
+// "page"), stepping at an equal rate from 1/16 (level 1) to 1/2 (level 5).
+private val START_ICON_SIZE_FRACTIONS = listOf(0.0625f, 0.171875f, 0.28125f, 0.390625f, 0.5f)
+private const val START_ICON_SIZE_COUNT = 5
 
 // Windows 11 Start menu: search box, Pinned grid with "All apps",
 // Recommended recent files, user + power footer.
@@ -301,6 +312,29 @@ fun StartMenu(
         }
     }
 
+    // Per-app Start-menu pinned-tile sizes (1..5), on the Start menu's own scale
+    val startIconSizesJson by com.neversoft.launcher.data.AppSettings
+        .startIconSizesFlow(context).collectAsState(initial = "{}")
+    val startIconSizes = remember(startIconSizesJson) {
+        runCatching {
+            val o = org.json.JSONObject(startIconSizesJson)
+            buildMap {
+                val keys = o.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    put(k, o.optInt(k, 1).coerceIn(1, START_ICON_SIZE_COUNT))
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+    fun setStartIconSize(pkg: String, level: Int) {
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setStartIconSize(
+                context, pkg, level.coerceIn(1, START_ICON_SIZE_COUNT),
+            )
+        }
+    }
+
     val searchEngine = remember {
         LauncherSearchEngine(
             listOf(AppSearchProvider { apps }, SettingsSearchProvider(), FileSearchProvider()),
@@ -420,6 +454,8 @@ fun StartMenu(
                             folderPhotoPicker.launch("image/*")
                         },
                         onRemoveFolderPhoto = { idx -> setFolderImage(idx, "") },
+                        startIconSizes = startIconSizes,
+                        onSetStartIconSize = { pkg, level -> setStartIconSize(pkg, level) },
                     )
                     StartView.ALL_APPS -> AllAppsView(
                         apps = apps,
@@ -644,6 +680,7 @@ private fun SectionHeader(title: String, actionLabel: String?, onAction: (() -> 
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PinnedView(
     apps: List<InstalledApp>,
@@ -661,6 +698,8 @@ private fun PinnedView(
     onRenameFolder: (Int, String) -> Unit,
     onPickFolderPhoto: (Int) -> Unit,
     onRemoveFolderPhoto: (Int) -> Unit,
+    startIconSizes: Map<String, Int>,
+    onSetStartIconSize: (String, Int) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
@@ -693,29 +732,34 @@ private fun PinnedView(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 12.dp),
     ) {
-        // ——— Pinned: one row of apps + a row of 4 folders ———
+        // ——— Pinned: resizable apps (wrap to fit) + a row of 4 folders ———
         SectionHeader("Pinned", "All apps", onAllApps)
         Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            if (pinnedApps.isEmpty()) {
-                Text(
-                    if (!appsLoaded) "Loading…" else "Long-press an app in All apps to pin it here",
-                    color = theme.textSecondary, fontSize = 12.sp,
-                    modifier = Modifier.padding(vertical = 14.dp),
-                )
-            } else {
-                pinnedApps.take(perRow).forEach { app ->
-                    Box(Modifier.weight(1f)) {
+        if (pinnedApps.isEmpty()) {
+            Text(
+                if (!appsLoaded) "Loading…" else "Long-press an app in All apps to pin it here",
+                color = theme.textSecondary, fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+            )
+        } else {
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                // The Start menu's own "page" for the size scale is this panel's width.
+                val pageWidth = maxWidth
+                FlowRow(Modifier.fillMaxWidth()) {
+                    pinnedApps.forEach { app ->
+                        val level = (startIconSizes[app.packageName] ?: 1).coerceIn(1, START_ICON_SIZE_COUNT)
                         PinnedAppTile(
                             app = app,
                             isDockPinned = dockPins.contains(app.packageName),
                             onClick = { onLaunch(app) },
                             onUnpin = { onUnpin(app.packageName) },
                             onToggleDockPin = { onToggleDockPin(app.packageName) },
+                            iconSizeDp = pageWidth * START_ICON_SIZE_FRACTIONS[level - 1],
+                            sizeLevel = level,
+                            onSetSize = { lvl -> onSetStartIconSize(app.packageName, lvl) },
                         )
                     }
                 }
-                repeat(perRow - pinnedApps.take(perRow).size) { Spacer(Modifier.weight(1f)) }
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -960,12 +1004,20 @@ private fun PinnedAppTile(
     onClick: () -> Unit,
     onUnpin: () -> Unit,
     onToggleDockPin: () -> Unit,
+    iconSizeDp: androidx.compose.ui.unit.Dp = 32.dp,
+    sizeLevel: Int = 1,
+    onSetSize: ((Int) -> Unit)? = null,
 ) {
     val theme = LocalLauncherTheme.current
     var menuOpen by remember { mutableStateOf(false) }
+    var sizeChooser by remember { mutableStateOf(false) }
+    // Resizable pinned tiles get a min width so labels stay readable and the
+    // FlowRow spaces them; recents/folder tiles keep their content sizing.
+    val widthMod = if (onSetSize != null) Modifier.widthIn(min = 60.dp) else Modifier
+    val labelSp = if (onSetSize != null) (iconSizeDp.value * 0.16f).coerceIn(11f, 20f) else 11f
     Box {
         Column(
-            Modifier
+            widthMod
                 .clip(RoundedCornerShape(4.dp))
                 .pointerInput(app.packageName) {
                     detectTapGestures(
@@ -973,14 +1025,14 @@ private fun PinnedAppTile(
                         onLongPress = { menuOpen = true },
                     )
                 }
-                .padding(vertical = 8.dp),
+                .padding(vertical = 8.dp, horizontal = if (onSetSize != null) 6.dp else 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (app.icon != null) {
-                Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(32.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
+                Image(bitmap = app.icon, contentDescription = app.label, modifier = Modifier.size(iconSizeDp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
             } else {
                 Box(
-                    Modifier.size(32.dp).background(theme.card, RoundedCornerShape(6.dp)),
+                    Modifier.size(iconSizeDp).background(theme.card, RoundedCornerShape(6.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(app.label.take(1).uppercase(), color = theme.text, fontSize = 14.sp)
@@ -988,27 +1040,51 @@ private fun PinnedAppTile(
             }
             Spacer(Modifier.height(5.dp))
             Text(
-                app.label, color = theme.text, fontSize = 11.sp, maxLines = 1,
+                app.label, color = theme.text, fontSize = labelSp.sp, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 2.dp),
             )
         }
         DropdownMenu(
             expanded = menuOpen,
-            onDismissRequest = { menuOpen = false },
+            onDismissRequest = { menuOpen = false; sizeChooser = false },
             shape = RoundedCornerShape(8.dp),
             containerColor = theme.menuSurface,
         ) {
-            ContextMenuItem(Icons.Outlined.PushPin, "Unpin from Start") {
-                menuOpen = false
-                onUnpin()
-            }
-            ContextMenuItem(
-                Icons.Outlined.PushPin,
-                if (isDockPinned) "Unpin from taskbar" else "Pin to taskbar",
-            ) {
-                menuOpen = false
-                onToggleDockPin()
+            if (sizeChooser && onSetSize != null) {
+                for (level in 1..START_ICON_SIZE_COUNT) {
+                    val label = when (level) {
+                        1 -> "1 — smallest"
+                        START_ICON_SIZE_COUNT -> "$level — largest"
+                        else -> level.toString()
+                    }
+                    ContextMenuItem(
+                        if (sizeLevel == level) Icons.Outlined.RadioButtonChecked
+                        else Icons.Outlined.RadioButtonUnchecked,
+                        label,
+                    ) {
+                        menuOpen = false
+                        sizeChooser = false
+                        onSetSize(level)
+                    }
+                }
+            } else {
+                ContextMenuItem(Icons.Outlined.PushPin, "Unpin from Start") {
+                    menuOpen = false
+                    onUnpin()
+                }
+                ContextMenuItem(
+                    Icons.Outlined.PushPin,
+                    if (isDockPinned) "Unpin from taskbar" else "Pin to taskbar",
+                ) {
+                    menuOpen = false
+                    onToggleDockPin()
+                }
+                if (onSetSize != null) {
+                    ContextMenuItem(Icons.Outlined.PhotoSizeSelectLarge, "Size") {
+                        sizeChooser = true
+                    }
+                }
             }
         }
     }

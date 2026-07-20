@@ -34,6 +34,9 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.PhotoSizeSelectLarge
+import androidx.compose.material.icons.outlined.RadioButtonChecked
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material.icons.outlined.Shortcut
 import androidx.compose.material3.DropdownMenu
@@ -85,16 +88,24 @@ import java.io.File
 import kotlin.math.roundToInt
 
 // A desktop icon. Kinds: builtin shell entries, app shortcuts, folders.
+// size is a level 1..5; the icon's on-screen side is that fraction of the
+// page width (see ICON_SIZE_FRACTIONS): 1 = 1/16 of a page, 5 = 1/2 of a page.
 private data class DeskItem(
     val id: String,
     val kind: String, // "builtin" | "app" | "folder"
     val label: String,
     val pkg: String? = null,
     val path: String? = null,
+    val size: Int = 1,
 )
 
+// Five icon sizes as a fraction of the page (screen) width, stepping at an
+// equal rate from 1/16 (level 1) to 1/2 (level 5).
+private val ICON_SIZE_FRACTIONS = listOf(0.0625f, 0.171875f, 0.28125f, 0.390625f, 0.5f)
+private const val ICON_SIZE_COUNT = 5
+
 private fun DeskItem.toJson(): JSONObject = JSONObject()
-    .put("id", id).put("kind", kind).put("label", label)
+    .put("id", id).put("kind", kind).put("label", label).put("size", size)
     .apply {
         pkg?.let { put("pkg", it) }
         path?.let { put("path", it) }
@@ -106,6 +117,7 @@ private fun deskItemFrom(json: JSONObject): DeskItem = DeskItem(
     label = json.getString("label"),
     pkg = json.optString("pkg").takeIf { it.isNotEmpty() },
     path = json.optString("path").takeIf { it.isNotEmpty() },
+    size = json.optInt("size", 1).coerceIn(1, ICON_SIZE_COUNT),
 )
 
 private val BUILTINS = listOf(
@@ -278,6 +290,14 @@ fun Desktop(
         persistItems(items.map { if (it.id == item.id) updated else it })
     }
 
+    fun setSize(item: DeskItem, level: Int) {
+        val clamped = level.coerceIn(1, ICON_SIZE_COUNT)
+        persistItems(items.map { if (it.id == item.id) it.copy(size = clamped) else it })
+    }
+
+    // The "page" the size fractions are relative to is the screen width.
+    val pageWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+
     Box(
         modifier.pointerInput(Unit) {
             detectTapGestures(
@@ -293,6 +313,8 @@ fun Desktop(
                     DesktopIconWithMenu(
                         item = item,
                         appIcon = appIcons[item.id],
+                        iconSizeDp = pageWidthDp * ICON_SIZE_FRACTIONS[item.size - 1],
+                        onSetSize = { level -> setSize(item, level) },
                         modifier = Modifier
                             .offset { IntOffset(pos.x.roundToInt(), pos.y.roundToInt()) },
                         onOpen = { activate(item) },
@@ -455,6 +477,8 @@ fun Desktop(
 private fun DesktopIconWithMenu(
     item: DeskItem,
     appIcon: ImageBitmap?,
+    iconSizeDp: androidx.compose.ui.unit.Dp,
+    onSetSize: (Int) -> Unit,
     modifier: Modifier,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
@@ -465,11 +489,16 @@ private fun DesktopIconWithMenu(
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
+    var sizeChooser by remember { mutableStateOf(false) }
+    // Keep small icons' labels readable; large icons let the tile grow.
+    val tileWidth = if (iconSizeDp > 72.dp) iconSizeDp else 72.dp
+    // Label scales gently with the icon so big icons don't get a tiny caption.
+    val labelSp = (iconSizeDp.value * 0.16f).coerceIn(11f, 22f)
 
     Box(modifier) {
         Column(
             Modifier
-                .width(80.dp)
+                .width(tileWidth)
                 // Quick tap opens the icon.
                 .pointerInput(item.id) {
                     detectTapGestures(onTap = { onOpen() })
@@ -491,14 +520,15 @@ private fun DesktopIconWithMenu(
                 },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // The icon fits to the chosen size (fills the sized box).
             when {
                 item.kind == "app" && appIcon != null ->
-                    Image(bitmap = appIcon, contentDescription = item.label, modifier = Modifier.size(38.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
+                    Image(bitmap = appIcon, contentDescription = item.label, modifier = Modifier.size(iconSizeDp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
                 item.kind == "folder" ->
-                    Icon(Icons.Filled.Folder, item.label, Modifier.size(38.dp), tint = Color(0xFFFFCA28))
+                    Icon(Icons.Filled.Folder, item.label, Modifier.size(iconSizeDp), tint = Color(0xFFFFCA28))
                 else -> {
                     val (icon, tint) = builtinIcon(item.id)
-                    Icon(icon, item.label, Modifier.size(38.dp), tint = tint)
+                    Icon(icon, item.label, Modifier.size(iconSizeDp), tint = tint)
                 }
             }
             Spacer(Modifier.height(3.dp))
@@ -506,7 +536,7 @@ private fun DesktopIconWithMenu(
                 item.label,
                 style = TextStyle(
                     color = Color.White,
-                    fontSize = 11.sp,
+                    fontSize = labelSp.sp,
                     shadow = Shadow(Color(0xB3000000), blurRadius = 4f),
                 ),
                 textAlign = TextAlign.Center,
@@ -517,45 +547,67 @@ private fun DesktopIconWithMenu(
 
         DropdownMenu(
             expanded = menuOpen,
-            onDismissRequest = { menuOpen = false },
+            onDismissRequest = { menuOpen = false; sizeChooser = false },
             shape = RoundedCornerShape(8.dp),
             containerColor = theme.menuSurface,
         ) {
-            DesktopMenuItem(Icons.Outlined.OpenInNew, "Open") {
-                menuOpen = false
-                onOpen()
-            }
-            if (item.kind == "app") {
-                DesktopMenuItem(Icons.Outlined.Info, "App info") {
-                    menuOpen = false
-                    runCatching {
-                        context.startActivity(
-                            Intent(
-                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.parse("package:${item.pkg}"),
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
+            if (sizeChooser) {
+                for (level in 1..ICON_SIZE_COUNT) {
+                    val label = when (level) {
+                        1 -> "1 — smallest"
+                        ICON_SIZE_COUNT -> "$level — largest"
+                        else -> level.toString()
+                    }
+                    DesktopMenuItem(
+                        if (item.size == level) Icons.Outlined.RadioButtonChecked
+                        else Icons.Outlined.RadioButtonUnchecked,
+                        label,
+                    ) {
+                        menuOpen = false
+                        sizeChooser = false
+                        onSetSize(level)
                     }
                 }
-            }
-            if (item.kind == "folder" || item.kind == "app") {
-                DesktopMenuItem(Icons.Outlined.DriveFileRenameOutline, "Rename") {
+            } else {
+                DesktopMenuItem(Icons.Outlined.OpenInNew, "Open") {
                     menuOpen = false
-                    onRename()
+                    onOpen()
                 }
-            }
-            DesktopMenuItem(Icons.Outlined.RemoveCircleOutline, "Remove from desktop") {
-                menuOpen = false
-                onRemove()
-            }
-            if (item.kind == "app") {
-                DesktopMenuItem(Icons.Outlined.Delete, "Uninstall") {
+                DesktopMenuItem(Icons.Outlined.PhotoSizeSelectLarge, "Size") {
+                    sizeChooser = true
+                }
+                if (item.kind == "app") {
+                    DesktopMenuItem(Icons.Outlined.Info, "App info") {
+                        menuOpen = false
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.parse("package:${item.pkg}"),
+                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    }
+                }
+                if (item.kind == "folder" || item.kind == "app") {
+                    DesktopMenuItem(Icons.Outlined.DriveFileRenameOutline, "Rename") {
+                        menuOpen = false
+                        onRename()
+                    }
+                }
+                DesktopMenuItem(Icons.Outlined.RemoveCircleOutline, "Remove from desktop") {
                     menuOpen = false
-                    runCatching {
-                        context.startActivity(
-                            Intent(Intent.ACTION_DELETE, Uri.parse("package:${item.pkg}"))
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
+                    onRemove()
+                }
+                if (item.kind == "app") {
+                    DesktopMenuItem(Icons.Outlined.Delete, "Uninstall") {
+                        menuOpen = false
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_DELETE, Uri.parse("package:${item.pkg}"))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
                     }
                 }
             }

@@ -26,6 +26,7 @@ object AppSettings {
     val KEY_RECENT_OPENED_FILES       = stringPreferencesKey("recent_opened_files")
     val KEY_QUICK_APPS                = stringPreferencesKey("quick_apps")
     val KEY_APP_ICON_OVERRIDES        = stringPreferencesKey("app_icon_overrides")
+    val KEY_START_ICON_SIZES          = stringPreferencesKey("start_icon_sizes")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -117,6 +118,19 @@ object AppSettings {
                 .getOrDefault(org.json.JSONObject())
             obj.remove(pkg)
             prefs[KEY_APP_ICON_OVERRIDES] = obj.toString()
+        }
+    }
+
+    // Per-app Start-menu pinned-tile size levels: JSON object {pkg: level 1..5}
+    fun startIconSizesFlow(context: Context): Flow<String> =
+        context.dataStore.data.map { it[KEY_START_ICON_SIZES] ?: "{}" }
+
+    suspend fun setStartIconSize(context: Context, pkg: String, level: Int) {
+        context.dataStore.edit { prefs ->
+            val obj = runCatching { org.json.JSONObject(prefs[KEY_START_ICON_SIZES] ?: "{}") }
+                .getOrDefault(org.json.JSONObject())
+            obj.put(pkg, level)
+            prefs[KEY_START_ICON_SIZES] = obj.toString()
         }
     }
 

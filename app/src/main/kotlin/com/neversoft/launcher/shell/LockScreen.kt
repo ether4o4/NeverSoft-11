@@ -49,7 +49,7 @@ fun LockScreen(onUnlock: () -> Unit, modifier: Modifier = Modifier) {
             indication = null,
         ) { onUnlock() },
     ) {
-        BloomWallpaper(isDark = theme.isDark, modifier = Modifier.fillMaxSize())
+        BloomWallpaper(isDark = theme.isDark, accent = theme.accent, modifier = Modifier.fillMaxSize())
         Column(
             Modifier.align(Alignment.TopCenter).padding(top = 96.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

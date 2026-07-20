@@ -158,7 +158,18 @@ fun ShellWindowCard(
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Spacer(Modifier.width(14.dp))
+                val isMac = theme.preset == com.neversoft.launcher.theme.ThemePreset.MACBOOK
+                if (isMac) {
+                    // macOS traffic lights, left side: close / minimize / zoom
+                    Spacer(Modifier.width(12.dp))
+                    TrafficLight(Color(0xFFFF5F57), "Close", onClose)
+                    Spacer(Modifier.width(8.dp))
+                    TrafficLight(Color(0xFFFEBC2E), "Minimize", onMinimize)
+                    Spacer(Modifier.width(8.dp))
+                    TrafficLight(Color(0xFF28C840), if (isMaximized) "Restore" else "Maximize", onMaximizeRestore)
+                    Spacer(Modifier.width(12.dp))
+                }
+                if (!isMac) Spacer(Modifier.width(14.dp))
                 Icon(
                     toIcon(window.contentType),
                     contentDescription = null,
@@ -175,6 +186,10 @@ fun ShellWindowCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (isMac) {
+                    // mac windows have no right-side caption buttons
+                    Spacer(Modifier.width(14.dp))
+                } else {
                 CaptionButton(onClick = onMinimize, contentDescription = "Minimize") { color ->
                     drawLine(
                         color,
@@ -220,6 +235,7 @@ fun ShellWindowCard(
                     val cy = size.height * 0.5f
                     drawLine(color, Offset(cx - s, cy - s), Offset(cx + s, cy + s), 1.2.dp.toPx())
                     drawLine(color, Offset(cx - s, cy + s), Offset(cx + s, cy - s), 1.2.dp.toPx())
+                }
                 }
             }
 
@@ -274,6 +290,19 @@ fun ShellWindowCard(
             }
         }
     }
+}
+
+// macOS-style traffic-light window button (solid colored circle)
+@Composable
+private fun TrafficLight(color: Color, contentDescription: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(13.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(color)
+            .border(0.5.dp, Color.Black.copy(alpha = 0.12f), androidx.compose.foundation.shape.CircleShape)
+            .clickable { onClick() },
+    )
 }
 
 @Composable

@@ -134,14 +134,15 @@ private val BUILTINS = listOf(
 fun Desktop(
     onOpenWindow: (WindowContentType, String, String?) -> Unit,
     modifier: Modifier = Modifier,
+    page: Int = 1,
 ) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
 
-    var items by remember { mutableStateOf<List<DeskItem>>(emptyList()) }
-    var itemsLoaded by remember { mutableStateOf(false) }
+    var items by remember(page) { mutableStateOf<List<DeskItem>>(emptyList()) }
+    var itemsLoaded by remember(page) { mutableStateOf(false) }
     var desktopMenuAt by remember { mutableStateOf<Offset?>(null) }
     var appPickerOpen by remember { mutableStateOf(false) }
     var pickerApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
@@ -151,7 +152,7 @@ fun Desktop(
         items = newItems
         scope.launch {
             AppSettings.setDesktopItems(
-                context, JSONArray().apply { newItems.forEach { put(it.toJson()) } }.toString(),
+                context, JSONArray().apply { newItems.forEach { put(it.toJson()) } }.toString(), page,
             )
         }
     }
@@ -159,8 +160,8 @@ fun Desktop(
     // Observe the desktop-items store live, so shortcuts added elsewhere
     // (e.g. "Create desktop shortcut" in the Start menu's All apps) appear
     // without a relaunch.
-    LaunchedEffect(Unit) {
-        AppSettings.desktopItemsFlow(context).collect { stored ->
+    LaunchedEffect(page) {
+        AppSettings.desktopItemsFlow(context, page).collect { stored ->
             val parsed = if (stored.isEmpty()) {
                 null // never seeded
             } else {
@@ -170,8 +171,10 @@ fun Desktop(
                 }.getOrNull()
             }
             if (parsed == null) {
-                // First run: seed with the built-in shell icons (re-emits below)
-                if (!itemsLoaded) persistItems(BUILTINS)
+                // First run: page 1 seeds the built-in shell icons; the Work
+                // desktop (page 2) starts empty.
+                if (page == 2) { items = emptyList(); itemsLoaded = true }
+                else if (!itemsLoaded) persistItems(BUILTINS)
             } else {
                 // Drop shortcuts to apps that were uninstalled
                 val pm = context.packageManager
@@ -185,6 +188,7 @@ fun Desktop(
                         AppSettings.setDesktopItems(
                             context,
                             JSONArray().apply { cleaned.forEach { put(it.toJson()) } }.toString(),
+                            page,
                         )
                     }
                 }
@@ -215,12 +219,12 @@ fun Desktop(
 
     val cellPx = with(density) { 92.dp.toPx() }
     val marginPx = with(density) { 12.dp.toPx() }
-    val positions = remember { mutableStateMapOf<String, Offset>() }
-    var positionsLoaded by remember { mutableStateOf(false) }
+    val positions = remember(page) { mutableStateMapOf<String, Offset>() }
+    var positionsLoaded by remember(page) { mutableStateOf(false) }
 
-    LaunchedEffect(itemsLoaded, items.size) {
+    LaunchedEffect(itemsLoaded, items.size, page) {
         if (!itemsLoaded) return@LaunchedEffect
-        val stored = runCatching { JSONObject(AppSettings.desktopIconPositionsFlow(context).first()) }
+        val stored = runCatching { JSONObject(AppSettings.desktopIconPositionsFlow(context, page).first()) }
             .getOrDefault(JSONObject())
         items.forEachIndexed { index, item ->
             if (positions.containsKey(item.id)) return@forEachIndexed
@@ -239,7 +243,7 @@ fun Desktop(
         positions.forEach { (id, pos) ->
             json.put(id, JSONArray().put(pos.x.toDouble()).put(pos.y.toDouble()))
         }
-        scope.launch { AppSettings.setDesktopIconPositions(context, json.toString()) }
+        scope.launch { AppSettings.setDesktopIconPositions(context, json.toString(), page) }
     }
 
     fun activate(item: DeskItem) {
@@ -355,7 +359,7 @@ fun Desktop(
                         desktopMenuAt = null
                         newFolder()
                     }
-                    DesktopMenuItem(Icons.Outlined.Shortcut, "New shortcut") {
+                    DesktopMenuItem(Icons.Outlined.Shortcut, "Add apps") {
                         desktopMenuAt = null
                         appPickerOpen = true
                         scope.launch { pickerApps = InstalledAppsRepository.loadApps(context) }
@@ -416,60 +420,23 @@ fun Desktop(
         }
     }
 
-    // App picker for "New shortcut"
+    // Multi-select app picker: add one or more apps to the desktop at once
     if (appPickerOpen) {
-        Dialog(onDismissRequest = { appPickerOpen = false }) {
-            Column(
-                Modifier
-                    .width(320.dp)
-                    .height(440.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(theme.windowSurface)
-                    .border(1.dp, theme.stroke, RoundedCornerShape(8.dp))
-                    .padding(16.dp),
-            ) {
-                Text("Choose an app", color = theme.text, fontSize = 16.sp)
-                Spacer(Modifier.height(10.dp))
-                if (pickerApps.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Loading…", color = theme.textSecondary, fontSize = 12.sp)
-                    }
-                } else {
-                    LazyColumn {
-                        items(pickerApps, key = { it.packageName }) { app ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .clickable {
-                                        appPickerOpen = false
-                                        val id = "app_${app.packageName}"
-                                        if (items.none { it.id == id }) {
-                                            persistItems(
-                                                items + DeskItem(
-                                                    id = id, kind = "app",
-                                                    label = app.label, pkg = app.packageName,
-                                                ),
-                                            )
-                                        }
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (app.icon != null) {
-                                    Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(26.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    app.label, color = theme.text, fontSize = 13.sp,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
+        com.neversoft.launcher.apps.AppPickerDialog(
+            title = if (page == 2) "Add apps to Work desktop" else "Add apps to desktop",
+            apps = pickerApps,
+            onConfirm = { pkgs ->
+                val byPkg = pickerApps.associateBy { it.packageName }
+                val additions = pkgs.mapNotNull { pkg ->
+                    val id = "app_$pkg"
+                    if (items.none { it.id == id }) {
+                        byPkg[pkg]?.let { DeskItem(id = id, kind = "app", label = it.label, pkg = pkg) }
+                    } else null
                 }
-            }
-        }
+                if (additions.isNotEmpty()) persistItems(items + additions)
+            },
+            onDismiss = { appPickerOpen = false },
+        )
     }
 }
 
@@ -503,19 +470,20 @@ private fun DesktopIconWithMenu(
                 .pointerInput(item.id) {
                     detectTapGestures(onTap = { onOpen() })
                 }
-                // Long-press then drag to move; long-press and release without
-                // moving opens the context menu (Windows right-click equivalent).
+                // Long-press (click and hold) auto-pops the menu immediately.
+                // If you then drag, the menu dismisses and the icon follows,
+                // so both "hold for options" and "drag to move" work.
                 .pointerInput(item.id) {
                     var moved = false
                     detectDragGesturesAfterLongPress(
-                        onDragStart = { moved = false },
+                        onDragStart = { moved = false; menuOpen = true },
                         onDrag = { change, dragAmount ->
                             change.consume()
-                            moved = true
+                            if (!moved) { moved = true; menuOpen = false }
                             onDragDelta(dragAmount)
                         },
-                        onDragEnd = { if (moved) onDragEnd() else menuOpen = true },
-                        onDragCancel = { if (!moved) menuOpen = true },
+                        onDragEnd = { if (moved) onDragEnd() },
+                        onDragCancel = { },
                     )
                 },
             horizontalAlignment = Alignment.CenterHorizontally,

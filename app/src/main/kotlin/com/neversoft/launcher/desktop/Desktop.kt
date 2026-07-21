@@ -222,17 +222,45 @@ fun Desktop(
     val positions = remember(page) { mutableStateMapOf<String, Offset>() }
     var positionsLoaded by remember(page) { mutableStateOf(false) }
 
+    // Usable desktop height for grid placement (screen minus taskbar/insets)
+    val usableHeightPx = remember {
+        context.resources.displayMetrics.heightPixels.toFloat() -
+            with(density) { 150.dp.toPx() }
+    }
+
+    // First grid cell not occupied by any existing icon, filling each column
+    // top-to-bottom then moving right — like Windows auto-arrange. Never
+    // places off-screen.
+    fun firstFreeCell(taken: MutableList<Offset>): Offset {
+        val rows = (((usableHeightPx - marginPx) / cellPx).toInt()).coerceAtLeast(1)
+        var col = 0
+        while (col < 60) {
+            for (row in 0 until rows) {
+                val p = Offset(marginPx + col * cellPx, marginPx + row * cellPx)
+                val free = taken.none { t ->
+                    kotlin.math.abs(t.x - p.x) < cellPx * 0.5f &&
+                        kotlin.math.abs(t.y - p.y) < cellPx * 0.5f
+                }
+                if (free) { taken.add(p); return p }
+            }
+            col++
+        }
+        return Offset(marginPx, marginPx)
+    }
+
     LaunchedEffect(itemsLoaded, items.size, page) {
         if (!itemsLoaded) return@LaunchedEffect
         val stored = runCatching { JSONObject(AppSettings.desktopIconPositionsFlow(context, page).first()) }
             .getOrDefault(JSONObject())
-        items.forEachIndexed { index, item ->
-            if (positions.containsKey(item.id)) return@forEachIndexed
+        val taken = positions.values.toMutableList()
+        items.forEach { item ->
+            if (positions.containsKey(item.id)) return@forEach
             val arr = stored.optJSONArray(item.id)
             positions[item.id] = if (arr != null && arr.length() == 2) {
                 Offset(arr.optDouble(0, 0.0).toFloat(), arr.optDouble(1, 0.0).toFloat())
+                    .also { taken.add(it) }
             } else {
-                Offset(marginPx, marginPx + index * cellPx)
+                firstFreeCell(taken)
             }
         }
         positionsLoaded = true
@@ -433,7 +461,23 @@ fun Desktop(
                         byPkg[pkg]?.let { DeskItem(id = id, kind = "app", label = it.label, pkg = pkg) }
                     } else null
                 }
-                if (additions.isNotEmpty()) persistItems(items + additions)
+                if (additions.isNotEmpty()) {
+                    // Place each new icon on a free grid cell right away so
+                    // they always land visible (never stacked or off-screen)
+                    val taken = positions.values.toMutableList()
+                    additions.forEach { item -> positions[item.id] = firstFreeCell(taken) }
+                    persistItems(items + additions)
+                    persistPositions()
+                }
+                android.widget.Toast.makeText(
+                    context,
+                    when {
+                        additions.isNotEmpty() -> "Added ${additions.size} app${if (additions.size == 1) "" else "s"}"
+                        pkgs.isNotEmpty() -> "Already on this desktop"
+                        else -> "Nothing selected"
+                    },
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
             },
             onDismiss = { appPickerOpen = false },
         )

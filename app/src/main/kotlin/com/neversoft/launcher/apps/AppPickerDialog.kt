@@ -123,8 +123,9 @@ fun AppPickerDialog(
                         .weight(1f)
                         .clip(RoundedCornerShape(4.dp))
                         .background(if (selected.isEmpty()) theme.card else theme.accent)
-                        .clickable(enabled = selected.isNotEmpty()) {
-                            onConfirm(selected.toList()); onDismiss()
+                        .clickable {
+                            onConfirm(selected.toList())
+                            if (selected.isNotEmpty()) onDismiss()
                         }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center,

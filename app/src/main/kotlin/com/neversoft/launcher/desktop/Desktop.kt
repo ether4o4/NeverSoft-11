@@ -30,9 +30,13 @@ import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Settings as SettingsIcon
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhotoSizeSelectLarge
 import androidx.compose.material.icons.outlined.RadioButtonChecked
@@ -97,6 +101,7 @@ private data class DeskItem(
     val pkg: String? = null,
     val path: String? = null,
     val size: Int = 1,
+    val iconPath: String = "", // custom icon image ("" = default)
 )
 
 // Five icon sizes as a fraction of the page (screen) width, stepping at an
@@ -106,6 +111,7 @@ private const val ICON_SIZE_COUNT = 5
 
 private fun DeskItem.toJson(): JSONObject = JSONObject()
     .put("id", id).put("kind", kind).put("label", label).put("size", size)
+    .put("iconPath", iconPath)
     .apply {
         pkg?.let { put("pkg", it) }
         path?.let { put("path", it) }
@@ -118,6 +124,7 @@ private fun deskItemFrom(json: JSONObject): DeskItem = DeskItem(
     pkg = json.optString("pkg").takeIf { it.isNotEmpty() },
     path = json.optString("path").takeIf { it.isNotEmpty() },
     size = json.optInt("size", 1).coerceIn(1, ICON_SIZE_COUNT),
+    iconPath = json.optString("iconPath", ""),
 )
 
 private val BUILTINS = listOf(
@@ -126,6 +133,9 @@ private val BUILTINS = listOf(
     DeskItem("browser", "builtin", "Browser"),
     DeskItem("thispc", "builtin", "This PC"),
 )
+
+// "Core" shell icons the user can add/remove from the home screen
+private val CORE_ITEMS = BUILTINS + DeskItem("settings", "builtin", "Settings")
 
 // The Windows 11 desktop: draggable grid-snapped icons, long-press
 // context menus (New folder / New shortcut / Personalize on empty space;
@@ -210,12 +220,41 @@ fun Desktop(
     var appIcons by remember { mutableStateOf(emptyMap<String, androidx.compose.ui.graphics.ImageBitmap>()) }
     LaunchedEffect(items, iconPack, iconOverrides) {
         appIcons = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            items.filter { it.kind == "app" }.mapNotNull { item ->
-                InstalledAppsRepository.loadIcon(context, iconPack, item.pkg!!, iconOverrides[item.pkg])
-                    ?.let { item.id to it.asImageBitmap() }
+            items.mapNotNull { item ->
+                // Per-item custom image wins for ANY icon (Recycle Bin included);
+                // app shortcuts then fall back to override/pack/system icons.
+                val custom = item.iconPath
+                    .takeIf { it.isNotEmpty() && File(it).exists() }
+                    ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 168) }
+                val bmp = custom ?: item.pkg?.let {
+                    InstalledAppsRepository.loadIcon(context, iconPack, it, iconOverrides[it])
+                }
+                bmp?.let { item.id to it.asImageBitmap() }
             }.toMap()
         }
     }
+
+    // Per-icon custom image picker (works for builtins like the Recycle Bin)
+    var iconTargetId by remember { mutableStateOf<String?>(null) }
+    val deskIconPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        val id = iconTargetId
+        iconTargetId = null
+        if (uri != null && id != null) {
+            scope.launch {
+                val path = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.neversoft.launcher.files.ImageStore.importImage(context, uri, "deskicon-$id")
+                }
+                if (path != null) {
+                    persistItems(items.map { if (it.id == id) it.copy(iconPath = path) else it })
+                }
+            }
+        }
+    }
+
+    var coreAppsOpen by remember { mutableStateOf(false) }
+    var configOpen by remember { mutableStateOf(false) }
 
     val cellPx = with(density) { 92.dp.toPx() }
     val marginPx = with(density) { 12.dp.toPx() }
@@ -300,6 +339,7 @@ fun Desktop(
                 "bin" -> onOpenWindow(WindowContentType.FILE_EXPLORER, "Recycle Bin", Trash.dir().absolutePath)
                 "files" -> onOpenWindow(WindowContentType.FILE_EXPLORER, "File Explorer", null)
                 "thispc" -> onOpenWindow(WindowContentType.FILE_EXPLORER, "This PC", "/storage")
+                "settings" -> onOpenWindow(WindowContentType.SETTINGS, "Settings", null)
                 "browser" -> runCatching {
                     context.startActivity(
                         Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_BROWSER)
@@ -372,6 +412,13 @@ fun Desktop(
                         onOpen = { activate(item) },
                         onRemove = { persistItems(items - item) },
                         onRename = { renameTarget = item },
+                        onChangeIcon = {
+                            iconTargetId = item.id
+                            deskIconPicker.launch("image/*")
+                        },
+                        onResetIcon = if (item.iconPath.isNotEmpty()) {
+                            { persistItems(items.map { if (it.id == item.id) it.copy(iconPath = "") else it }) }
+                        } else null,
                         onDragDelta = { dragAmount ->
                             val current = positions[item.id] ?: Offset.Zero
                             positions[item.id] = Offset(
@@ -412,7 +459,15 @@ fun Desktop(
                         appPickerOpen = true
                         scope.launch { pickerApps = InstalledAppsRepository.loadApps(context) }
                     }
+                    DesktopMenuItem(Icons.Outlined.Computer, "Core apps") {
+                        desktopMenuAt = null
+                        coreAppsOpen = true
+                    }
                     Box(Modifier.fillMaxWidth().height(1.dp).background(theme.divider))
+                    DesktopMenuItem(Icons.Outlined.Tune, "Config & permissions") {
+                        desktopMenuAt = null
+                        configOpen = true
+                    }
                     DesktopMenuItem(Icons.Outlined.Palette, "Personalize") {
                         desktopMenuAt = null
                         onOpenWindow(WindowContentType.SETTINGS, "Settings", null)
@@ -502,6 +557,36 @@ fun Desktop(
             onDismiss = { appPickerOpen = false },
         )
     }
+
+    // Core (home) shell icons: toggle File Explorer, Recycle Bin, Settings, ...
+    if (coreAppsOpen) {
+        CoreAppsDialog(
+            present = items.map { it.id }.toSet(),
+            onToggle = { core ->
+                val existing = items.firstOrNull { it.id == core.id }
+                if (existing != null) {
+                    persistItems(items - existing)
+                } else {
+                    val taken = positions.values.toMutableList()
+                    positions[core.id] = firstFreeCell(taken)
+                    persistItems(items + core)
+                    persistPositions()
+                }
+            },
+            onDismiss = { coreAppsOpen = false },
+        )
+    }
+
+    // Config & permissions: each permission deep-links to its settings page
+    if (configOpen) {
+        ConfigPermissionsDialog(
+            onOpenSettingsWindow = {
+                configOpen = false
+                onOpenWindow(WindowContentType.SETTINGS, "Settings", null)
+            },
+            onDismiss = { configOpen = false },
+        )
+    }
 }
 
 @Composable
@@ -514,6 +599,8 @@ private fun DesktopIconWithMenu(
     onOpen: () -> Unit,
     onRemove: () -> Unit,
     onRename: () -> Unit,
+    onChangeIcon: () -> Unit,
+    onResetIcon: (() -> Unit)?,
     onDragDelta: (Offset) -> Unit,
     onDragEnd: () -> Unit,
 ) {
@@ -552,9 +639,10 @@ private fun DesktopIconWithMenu(
                 },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // The icon fits to the chosen size (fills the sized box).
+            // The icon fits to the chosen size (fills the sized box). A custom
+            // image (appIcons entry) wins for any kind — Recycle Bin included.
             when {
-                item.kind == "app" && appIcon != null ->
+                appIcon != null ->
                     Image(bitmap = appIcon, contentDescription = item.label, modifier = Modifier.size(iconSizeDp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
                 item.kind == "folder" ->
                     Icon(Icons.Filled.Folder, item.label, Modifier.size(iconSizeDp), tint = Color(0xFFFFCA28))
@@ -627,6 +715,16 @@ private fun DesktopIconWithMenu(
                         onRename()
                     }
                 }
+                DesktopMenuItem(Icons.Outlined.Image, "Change icon") {
+                    menuOpen = false
+                    onChangeIcon()
+                }
+                if (onResetIcon != null) {
+                    DesktopMenuItem(Icons.Outlined.Refresh, "Reset icon") {
+                        menuOpen = false
+                        onResetIcon()
+                    }
+                }
                 DesktopMenuItem(Icons.Outlined.RemoveCircleOutline, "Remove from desktop") {
                     menuOpen = false
                     onRemove()
@@ -663,10 +761,196 @@ private fun DesktopMenuItem(icon: ImageVector, label: String, onClick: () -> Uni
     }
 }
 
+// Toggle "core" shell icons (File Explorer, Recycle Bin, Settings, ...) on
+// and off the home screen.
+@Composable
+private fun CoreAppsDialog(
+    present: Set<String>,
+    onToggle: (DeskItem) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .width(300.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(theme.windowSurface)
+                .border(1.dp, theme.stroke, RoundedCornerShape(10.dp))
+                .padding(18.dp),
+        ) {
+            Text("Core apps", color = theme.text, fontSize = 16.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Tap to add or remove from this desktop",
+                color = theme.textSecondary, fontSize = 11.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            CORE_ITEMS.forEach { core ->
+                val onDesk = present.contains(core.id)
+                val (icon, tint) = builtinIcon(core.id)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(5.dp))
+                        .clickable { onToggle(core) }
+                        .padding(horizontal = 8.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(icon, null, Modifier.size(22.dp), tint = if (tint == Color.White) theme.text else tint)
+                    Spacer(Modifier.width(12.dp))
+                    Text(core.label, color = theme.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        if (onDesk) "Remove" else "Add",
+                        color = if (onDesk) theme.textSecondary else theme.accent,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Permission hub: shows each permission's status; every row deep-links
+// straight to the exact system page where it's granted.
+@Composable
+private fun ConfigPermissionsDialog(
+    onOpenSettingsWindow: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
+    val context = LocalContext.current
+    // Status is re-checked each time the dialog opens
+    val usageGranted = remember { hasUsageAccess(context) }
+    val filesGranted = remember { hasAllFilesAccess() }
+    val contactsGranted = remember { hasContactsPermission(context) }
+    val isDefaultHome = remember { isDefaultLauncher(context) }
+
+    fun open(intent: Intent) {
+        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .width(320.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(theme.windowSurface)
+                .border(1.dp, theme.stroke, RoundedCornerShape(10.dp))
+                .padding(18.dp),
+        ) {
+            Text("Config & permissions", color = theme.text, fontSize = 16.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Tap a permission to jump to its settings page",
+                color = theme.textSecondary, fontSize = 11.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+
+            PermissionLink("Usage access", "Recent apps row and app suggestions", usageGranted) {
+                open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            }
+            PermissionLink("All-files access", "File Explorer and file rows", filesGranted) {
+                open(
+                    Intent(
+                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:${context.packageName}"),
+                    ),
+                )
+            }
+            PermissionLink("Contacts & media", "Search and photo pickers", contactsGranted) {
+                open(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:${context.packageName}"),
+                    ),
+                )
+            }
+            PermissionLink("Default home app", "Make NeverSoft your launcher", isDefaultHome) {
+                open(Intent(Settings.ACTION_HOME_SETTINGS))
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text("Config", color = theme.textSecondary, fontSize = 11.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(theme.card)
+                    .border(1.dp, theme.stroke, RoundedCornerShape(5.dp))
+                    .clickable { onOpenSettingsWindow() }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Palette, null, Modifier.size(16.dp), tint = theme.text)
+                Spacer(Modifier.width(10.dp))
+                Text("NeverSoft settings (themes, wallpaper, Start button)", color = theme.text, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionLink(
+    label: String,
+    description: String,
+    granted: Boolean,
+    onClick: () -> Unit,
+) {
+    val theme = LocalLauncherTheme.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(5.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 8.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(10.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(if (granted) Color(0xFF6CCB5F) else Color(0xFFE81123)),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, color = theme.text, fontSize = 13.sp)
+            Text(description, color = theme.textSecondary, fontSize = 11.sp)
+        }
+        Text(if (granted) "On" else "Set up", color = if (granted) theme.textSecondary else theme.accent, fontSize = 12.sp)
+    }
+}
+
+private fun hasUsageAccess(context: android.content.Context): Boolean = runCatching {
+    val appOps = context.getSystemService(android.content.Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+    appOps.unsafeCheckOpNoThrow(
+        android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+        android.os.Process.myUid(),
+        context.packageName,
+    ) == android.app.AppOpsManager.MODE_ALLOWED
+}.getOrDefault(false)
+
+private fun hasAllFilesAccess(): Boolean =
+    android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R ||
+        Environment.isExternalStorageManager()
+
+private fun hasContactsPermission(context: android.content.Context): Boolean =
+    androidx.core.content.ContextCompat.checkSelfPermission(
+        context, android.Manifest.permission.READ_CONTACTS,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+private fun isDefaultLauncher(context: android.content.Context): Boolean = runCatching {
+    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+    context.packageManager.resolveActivity(intent, 0)
+        ?.activityInfo?.packageName == context.packageName
+}.getOrDefault(false)
+
 private fun builtinIcon(id: String): Pair<ImageVector, Color> = when (id) {
     "bin" -> Icons.Outlined.Delete to Color.White
     "files" -> Icons.Filled.Folder to Color(0xFFFFCA28)
     "browser" -> Icons.Outlined.Language to Color(0xFF6EC6F5)
     "thispc" -> Icons.Outlined.Computer to Color.White
+    "settings" -> Icons.Outlined.SettingsIcon to Color(0xFF9ECDF5)
     else -> Icons.Filled.Folder to Color.White
 }

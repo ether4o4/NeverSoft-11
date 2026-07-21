@@ -222,10 +222,13 @@ fun Desktop(
     val positions = remember(page) { mutableStateMapOf<String, Offset>() }
     var positionsLoaded by remember(page) { mutableStateOf(false) }
 
-    // Usable desktop height for grid placement (screen minus taskbar/insets)
+    // Usable desktop area for grid placement (screen minus taskbar/insets)
     val usableHeightPx = remember {
         context.resources.displayMetrics.heightPixels.toFloat() -
             with(density) { 150.dp.toPx() }
+    }
+    val usableWidthPx = remember {
+        context.resources.displayMetrics.widthPixels.toFloat()
     }
 
     // First grid cell not occupied by any existing icon, filling each column
@@ -248,30 +251,47 @@ fun Desktop(
         return Offset(marginPx, marginPx)
     }
 
-    LaunchedEffect(itemsLoaded, items.size, page) {
-        if (!itemsLoaded) return@LaunchedEffect
-        val stored = runCatching { JSONObject(AppSettings.desktopIconPositionsFlow(context, page).first()) }
-            .getOrDefault(JSONObject())
-        val taken = positions.values.toMutableList()
-        items.forEach { item ->
-            if (positions.containsKey(item.id)) return@forEach
-            val arr = stored.optJSONArray(item.id)
-            positions[item.id] = if (arr != null && arr.length() == 2) {
-                Offset(arr.optDouble(0, 0.0).toFloat(), arr.optDouble(1, 0.0).toFloat())
-                    .also { taken.add(it) }
-            } else {
-                firstFreeCell(taken)
-            }
-        }
-        positionsLoaded = true
-    }
-
     fun persistPositions() {
         val json = JSONObject()
         positions.forEach { (id, pos) ->
             json.put(id, JSONArray().put(pos.x.toDouble()).put(pos.y.toDouble()))
         }
         scope.launch { AppSettings.setDesktopIconPositions(context, json.toString(), page) }
+    }
+
+    // Load positions and SELF-HEAL: any icon whose saved spot is off-screen
+    // or stacked on another icon's cell (as older versions could produce) is
+    // moved to the first free cell, and the repaired layout is saved back.
+    LaunchedEffect(itemsLoaded, items.size, page) {
+        if (!itemsLoaded) return@LaunchedEffect
+        val stored = runCatching { JSONObject(AppSettings.desktopIconPositionsFlow(context, page).first()) }
+            .getOrDefault(JSONObject())
+        val taken = mutableListOf<Offset>()
+        var repaired = false
+        items.forEach { item ->
+            val known = positions[item.id]
+                ?: stored.optJSONArray(item.id)?.takeIf { it.length() == 2 }
+                    ?.let { Offset(it.optDouble(0, 0.0).toFloat(), it.optDouble(1, 0.0).toFloat()) }
+            val offScreen = known != null && (
+                known.x < 0f || known.y < 0f ||
+                    known.x > usableWidthPx - cellPx * 0.6f ||
+                    known.y > usableHeightPx - cellPx * 0.25f
+                )
+            val stacked = known != null && taken.any { t ->
+                kotlin.math.abs(t.x - known.x) < cellPx * 0.5f &&
+                    kotlin.math.abs(t.y - known.y) < cellPx * 0.5f
+            }
+            val pos = if (known == null || offScreen || stacked) {
+                repaired = true
+                firstFreeCell(taken)
+            } else {
+                taken.add(known)
+                known
+            }
+            if (positions[item.id] != pos) positions[item.id] = pos
+        }
+        positionsLoaded = true
+        if (repaired) persistPositions()
     }
 
     fun activate(item: DeskItem) {

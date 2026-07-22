@@ -12,8 +12,8 @@ android {
         applicationId = "com.neversoft.launcher"
         minSdk = 29
         targetSdk = 35
-        versionCode = 29
-        versionName = "2.15.0"
+        versionCode = 30
+        versionName = "2.15.1"
     }
 
     // A stable signing identity is required so the rolling-release APK can

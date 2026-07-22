@@ -622,19 +622,34 @@ private fun DesktopIconWithMenu(
                     detectTapGestures(onTap = { onOpen() })
                 }
                 // Long-press (click and hold) auto-pops the menu immediately.
-                // If you then drag, the menu dismisses and the icon follows,
-                // so both "hold for options" and "drag to move" work.
+                // Finger micro-jitter is ignored via a slop threshold — only a
+                // deliberate drag past it dismisses the menu and moves the
+                // icon, so the menu never flashes open and vanishes.
                 .pointerInput(item.id) {
                     var moved = false
+                    var pending = Offset.Zero
+                    val slop = viewConfiguration.touchSlop * 2f
                     detectDragGesturesAfterLongPress(
-                        onDragStart = { moved = false; menuOpen = true },
+                        onDragStart = {
+                            moved = false
+                            pending = Offset.Zero
+                            menuOpen = true
+                        },
                         onDrag = { change, dragAmount ->
                             change.consume()
-                            if (!moved) { moved = true; menuOpen = false }
-                            onDragDelta(dragAmount)
+                            if (!moved) {
+                                pending += dragAmount
+                                if (pending.getDistance() > slop) {
+                                    moved = true
+                                    menuOpen = false
+                                    onDragDelta(pending)
+                                }
+                            } else {
+                                onDragDelta(dragAmount)
+                            }
                         },
                         onDragEnd = { if (moved) onDragEnd() },
-                        onDragCancel = { },
+                        onDragCancel = { if (moved) onDragEnd() },
                     )
                 },
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -670,6 +685,10 @@ private fun DesktopIconWithMenu(
             onDismissRequest = { menuOpen = false; sizeChooser = false },
             shape = RoundedCornerShape(8.dp),
             containerColor = theme.menuSurface,
+            // Non-focusable: the popup must not grab the pointer stream while
+            // the long-press finger is still down, or the gesture gets
+            // cancelled and the menu behaves erratically.
+            properties = androidx.compose.ui.window.PopupProperties(focusable = false),
         ) {
             if (sizeChooser) {
                 for (level in 1..ICON_SIZE_COUNT) {

@@ -29,7 +29,10 @@ object InstalledAppsRepository {
     @Volatile private var cachedOverrides: String? = null
     @Volatile private var cachedAt: Long = 0
     private val iconMemo = HashMap<String, ImageBitmap?>()
-    private const val CACHE_TTL_MS = 30_000L
+    // Long TTL: the cache is keyed on icon pack + overrides so changes still
+    // refresh immediately; the TTL only bounds staleness for installs/removals
+    // (which also re-trigger loads via package changes on relaunch).
+    private const val CACHE_TTL_MS = 10 * 60_000L
 
     suspend fun loadApps(context: Context): List<InstalledApp> = withContext(Dispatchers.IO) {
         val iconPack = AppSettings.iconPackFlow(context).first()

@@ -180,8 +180,8 @@ fun ShellScreen(
 
         AnimatedVisibility(
             visible = taskViewVisible,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(120)),
+            enter = fadeIn(tween(110)),
+            exit = fadeOut(tween(85)),
             modifier = Modifier.fillMaxSize(),
         ) {
             TaskView(
@@ -217,8 +217,8 @@ fun ShellScreen(
         // Start menu: anchored bottom-left, resized from its top-right corner
         AnimatedVisibility(
             visible = flyout == Flyout.START || flyout == Flyout.SEARCH,
-            enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-            exit = fadeOut(tween(110)) + slideOutVertically(tween(110)) { it / 10 },
+            enter = fadeIn(tween(120)) + slideInVertically(tween(130, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 8 },
+            exit = fadeOut(tween(80)) + slideOutVertically(tween(80)) { it / 8 },
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 12.dp, bottom = bottomBar + 8.dp),
@@ -263,8 +263,8 @@ fun ShellScreen(
 
         AnimatedVisibility(
             visible = flyout == Flyout.QUICK_SETTINGS,
-            enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-            exit = fadeOut(tween(110)) + slideOutVertically(tween(110)) { it / 10 },
+            enter = fadeIn(tween(120)) + slideInVertically(tween(130, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 8 },
+            exit = fadeOut(tween(80)) + slideOutVertically(tween(80)) { it / 8 },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 12.dp, bottom = bottomBar + 8.dp),
@@ -275,8 +275,8 @@ fun ShellScreen(
         // Calendar: anchored bottom-right, resized from its top-left corner
         AnimatedVisibility(
             visible = flyout == Flyout.CALENDAR,
-            enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-            exit = fadeOut(tween(110)) + slideOutVertically(tween(110)) { it / 10 },
+            enter = fadeIn(tween(120)) + slideInVertically(tween(130, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 8 },
+            exit = fadeOut(tween(80)) + slideOutVertically(tween(80)) { it / 8 },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 12.dp, bottom = bottomBar + 8.dp),

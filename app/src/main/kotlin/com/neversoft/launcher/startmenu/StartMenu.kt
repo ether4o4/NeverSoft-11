@@ -1025,7 +1025,7 @@ private fun FolderTile(folder: StartFolder, apps: List<InstalledApp>, onClick: (
                         icons.chunked(2).take(2).forEach { row ->
                             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                 row.forEach { ic ->
-                                    Image(bitmap = ic, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Image(bitmap = ic, contentDescription = null, modifier = Modifier.size(14.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
                                 }
                             }
                         }

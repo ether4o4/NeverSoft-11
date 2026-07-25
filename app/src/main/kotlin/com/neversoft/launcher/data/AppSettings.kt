@@ -171,6 +171,25 @@ object AppSettings {
         }
     }
 
+    // Bulk variants: one DataStore write for many apps at once
+    suspend fun setStartIconSizes(context: Context, sizes: Map<String, Int>) {
+        context.dataStore.edit { prefs ->
+            val obj = runCatching { org.json.JSONObject(prefs[KEY_START_ICON_SIZES] ?: "{}") }
+                .getOrDefault(org.json.JSONObject())
+            sizes.forEach { (pkg, level) -> obj.put(pkg, level) }
+            prefs[KEY_START_ICON_SIZES] = obj.toString()
+        }
+    }
+
+    suspend fun setAppIcons(context: Context, icons: Map<String, String>) {
+        context.dataStore.edit { prefs ->
+            val obj = runCatching { org.json.JSONObject(prefs[KEY_APP_ICON_OVERRIDES] ?: "{}") }
+                .getOrDefault(org.json.JSONObject())
+            icons.forEach { (pkg, path) -> obj.put(pkg, path) }
+            prefs[KEY_APP_ICON_OVERRIDES] = obj.toString()
+        }
+    }
+
     // Taskbar "Quick apps" folder: JSON array of package names (max 6)
     fun quickAppsFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_QUICK_APPS] ?: "[]" }

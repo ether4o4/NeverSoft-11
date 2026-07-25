@@ -368,6 +368,60 @@ fun StartMenu(
         }
     }
 
+    // Bulk change icon: pick ONE photo, apply it to every selected app
+    var bulkIconPkgs by remember { mutableStateOf<List<String>>(emptyList()) }
+    val bulkIconPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        val pkgs = bulkIconPkgs
+        bulkIconPkgs = emptyList()
+        if (uri != null && pkgs.isNotEmpty()) {
+            scope.launch {
+                val path = withContext(Dispatchers.IO) {
+                    // Timestamped prefix so later bulk imports never delete a
+                    // file that earlier-selected apps still point to
+                    ImageStore.importImage(context, uri, "appicon-bulk-${System.currentTimeMillis()}")
+                }
+                if (path != null) {
+                    com.neversoft.launcher.data.AppSettings.setAppIcons(context, pkgs.associateWith { path })
+                    apps = InstalledAppsRepository.loadApps(context)
+                    android.widget.Toast.makeText(
+                        context, "Icon changed for ${pkgs.size} app${if (pkgs.size == 1) "" else "s"}",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    // Bulk icon size: Start tiles for the selected apps, plus any copies of
+    // them on the desktops
+    fun bulkSetSize(level: Int, pkgs: List<String>) {
+        val pkgSet = pkgs.toSet()
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setStartIconSizes(context, pkgs.associateWith { level })
+            for (page in 1..4) {
+                runCatching {
+                    val raw = com.neversoft.launcher.data.AppSettings.desktopItemsFlow(context, page).first()
+                    if (raw.isBlank()) return@runCatching
+                    val arr = JSONArray(raw)
+                    var changed = false
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        if (o.optString("pkg") in pkgSet) { o.put("size", level); changed = true }
+                    }
+                    if (changed) {
+                        com.neversoft.launcher.data.AppSettings.setDesktopItems(context, arr.toString(), page)
+                    }
+                }
+            }
+            android.widget.Toast.makeText(
+                context, "Size $level set for ${pkgs.size} app${if (pkgs.size == 1) "" else "s"}",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
     fun bulkAddToQuick(pkgs: List<String>) {
         scope.launch {
             val current = runCatching {
@@ -556,6 +610,11 @@ fun StartMenu(
                         onBulkToDesktop = { pkgs -> bulkAddToDesktop(pkgs) },
                         onBulkToQuick = { pkgs -> bulkAddToQuick(pkgs) },
                         onBulkPin = { pkgs -> setPins((pins + pkgs).distinct()) },
+                        onBulkChangeIcon = { pkgs ->
+                            bulkIconPkgs = pkgs
+                            bulkIconPicker.launch("image/*")
+                        },
+                        onBulkSize = { level, pkgs -> bulkSetSize(level, pkgs) },
                     )
                     StartView.SEARCH -> SearchResultsView(
                         query = query, results = results, apps = apps,
@@ -1261,11 +1320,14 @@ private fun AllAppsView(
     onBulkToDesktop: (List<String>) -> Unit,
     onBulkToQuick: (List<String>) -> Unit,
     onBulkPin: (List<String>) -> Unit,
+    onBulkChangeIcon: (List<String>) -> Unit,
+    onBulkSize: (Int, List<String>) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     // Multi-select mode: check several apps, then move them all at once
     var selecting by remember { mutableStateOf(false) }
     val selected = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    var sizePick by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 32.dp),
@@ -1276,11 +1338,25 @@ private fun AllAppsView(
                 color = theme.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.weight(1f))
+            if (selecting) {
+                HeaderChip(
+                    if (selected.size == apps.size) "None" else "Select all",
+                    Icons.Outlined.Check,
+                ) {
+                    if (selected.size == apps.size) {
+                        selected.clear()
+                    } else {
+                        selected.clear()
+                        selected.addAll(apps.map { it.packageName })
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+            }
             HeaderChip(
                 if (selecting) "Done" else "Select",
                 if (selecting) Icons.Outlined.Check else Icons.Outlined.Add,
             ) {
-                if (selecting) selected.clear()
+                if (selecting) { selected.clear(); sizePick = false }
                 selecting = !selecting
             }
             Spacer(Modifier.width(8.dp))
@@ -1439,25 +1515,40 @@ private fun AllAppsView(
             }
         }
 
-        // Bulk action bar: move every checked app somewhere in one tap
+        // Bulk action bar: move / restyle every checked app in one tap
         if (selecting && selected.isNotEmpty()) {
             @OptIn(ExperimentalLayoutApi::class)
             FlowRow(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ChipButton("→ Desktop") {
-                    onBulkToDesktop(selected.toList()); selected.clear(); selecting = false
-                }
-                ChipButton("→ Pin to Start") {
-                    onBulkPin(selected.toList()); selected.clear(); selecting = false
-                }
-                ChipButton("→ Quick apps") {
-                    onBulkToQuick(selected.toList()); selected.clear(); selecting = false
-                }
-                folders.forEachIndexed { index, folder ->
-                    ChipButton("→ ${folder.name}") {
-                        onBulkToFolder(index, selected.toList()); selected.clear(); selecting = false
+                if (sizePick) {
+                    // Second tier: pick the size level to apply to all checked
+                    for (level in 1..START_ICON_SIZE_COUNT) {
+                        ChipButton("Size $level") {
+                            onBulkSize(level, selected.toList())
+                            sizePick = false; selected.clear(); selecting = false
+                        }
+                    }
+                    ChipButton("Cancel") { sizePick = false }
+                } else {
+                    ChipButton("→ Desktop") {
+                        onBulkToDesktop(selected.toList()); selected.clear(); selecting = false
+                    }
+                    ChipButton("→ Pin to Start") {
+                        onBulkPin(selected.toList()); selected.clear(); selecting = false
+                    }
+                    ChipButton("→ Quick apps") {
+                        onBulkToQuick(selected.toList()); selected.clear(); selecting = false
+                    }
+                    ChipButton("→ Change icon") {
+                        onBulkChangeIcon(selected.toList()); selected.clear(); selecting = false
+                    }
+                    ChipButton("→ Icon size") { sizePick = true }
+                    folders.forEachIndexed { index, folder ->
+                        ChipButton("→ ${folder.name}") {
+                            onBulkToFolder(index, selected.toList()); selected.clear(); selecting = false
+                        }
                     }
                 }
             }

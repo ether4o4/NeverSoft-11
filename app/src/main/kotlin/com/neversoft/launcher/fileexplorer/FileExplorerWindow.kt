@@ -108,12 +108,18 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
 
     val inTrash = Trash.isTrash(currentDir)
 
-    // Regular directory listing (null = unreadable)
+    // Regular directory listing (null = unreadable). Android never lets apps
+    // list /storage itself — even with all-files access — so "This PC"
+    // synthesizes the volume list from StorageManager instead of wrongly
+    // showing the permission screen.
     val listing: List<File>? = remember(currentDir, refreshTick) {
-        if (inTrash) emptyList()
-        else currentDir.listFiles()
-            ?.filter { !(it.name.startsWith(".") && it.parentFile?.absolutePath == home.absolutePath) }
-            ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+        when {
+            inTrash -> emptyList()
+            currentDir.absolutePath == "/storage" -> storageVolumeDirs(context)
+            else -> currentDir.listFiles()
+                ?.filter { !(it.name.startsWith(".") && it.parentFile?.absolutePath == home.absolutePath) }
+                ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+        }
     }
     // Recycle Bin listing (own bin + Android system trash)
     val binEntries: List<Trash.TrashEntry> = remember(currentDir, refreshTick) {
@@ -390,7 +396,7 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
                                 FileListRow(
                                     icon = if (file.isDirectory) Icons.Filled.Folder else fileIcon(file.name),
                                     iconTint = if (file.isDirectory) Color(0xFFFFCA28) else theme.textSecondary,
-                                    name = file.name,
+                                    name = volumeDisplayName(file) ?: file.name,
                                     subtitleUnder = null,
                                     date = file.lastModified(),
                                     sizeText = if (file.isDirectory) "" else formatSize(file.length()),
@@ -590,6 +596,30 @@ private fun PermissionEmptyState() {
             })
         }
     }
+}
+
+// Storage volumes for "This PC": internal storage plus any SD card / USB
+// drive, resolved through StorageManager (listing /storage directly is
+// blocked by Android regardless of permissions).
+private fun storageVolumeDirs(context: android.content.Context): List<File> = runCatching {
+    val sm = context.getSystemService(android.content.Context.STORAGE_SERVICE)
+        as android.os.storage.StorageManager
+    val vols = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        sm.storageVolumes.mapNotNull { it.directory }
+    } else {
+        emptyList()
+    }
+    vols.ifEmpty { listOf(Environment.getExternalStorageDirectory()) }
+}.getOrDefault(listOf(Environment.getExternalStorageDirectory()))
+
+// Pretty name for a storage-volume root ("Internal storage", "SD card"),
+// null for ordinary files.
+private fun volumeDisplayName(file: File): String? = when {
+    file.absolutePath == Environment.getExternalStorageDirectory().absolutePath -> "Internal storage"
+    file.parentFile?.absolutePath == "/storage" && file.name != "emulated" && file.name != "self" ->
+        "SD card (${file.name})"
+    file.absolutePath == "/storage/emulated/0" -> "Internal storage"
+    else -> null
 }
 
 // Breadcrumb segments: label + navigable dir (null = not navigable)

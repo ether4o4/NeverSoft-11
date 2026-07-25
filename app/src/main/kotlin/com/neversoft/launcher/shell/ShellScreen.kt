@@ -156,12 +156,13 @@ fun ShellScreen(
 
         // Work-profile PIN ("" = not locked)
         val workPin by AppSettings.workPinFlow(context).collectAsState(initial = "")
+        val extraPages by AppSettings.extraPagesFlow(context).collectAsState(initial = 0)
         fun requestDesktop(target: Int) {
             when {
                 target == currentDesktop -> Unit
                 target == 2 && workPin.isEmpty() -> workPinPrompt = "setup"
                 target == 2 -> workPinPrompt = "enter"
-                else -> currentDesktop = 1
+                else -> currentDesktop = target
             }
         }
 
@@ -201,6 +202,13 @@ fun ShellScreen(
                     requestDesktop(target)
                 },
                 workLocked = workPin.isNotEmpty(),
+                extraPages = extraPages,
+                onAddPage = {
+                    val newPage = 3 + extraPages
+                    scope.launch { AppSettings.setExtraPages(context, extraPages + 1) }
+                    taskViewVisible = false
+                    currentDesktop = newPage
+                },
             )
         }
 

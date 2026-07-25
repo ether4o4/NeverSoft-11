@@ -203,6 +203,7 @@ private fun runtimePermissionsForDevice(): Array<String> {
         permissions += Manifest.permission.READ_MEDIA_IMAGES
         permissions += Manifest.permission.READ_MEDIA_VIDEO
         permissions += Manifest.permission.READ_MEDIA_AUDIO
+        permissions += Manifest.permission.POST_NOTIFICATIONS
     } else {
         permissions += Manifest.permission.READ_EXTERNAL_STORAGE
     }

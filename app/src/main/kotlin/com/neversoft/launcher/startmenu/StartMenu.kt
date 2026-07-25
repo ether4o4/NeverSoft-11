@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,11 +39,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.outlined.AddToHomeScreen
 import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Description
@@ -314,6 +317,70 @@ fun StartMenu(
     }
 
     var addAppsOpen by remember { mutableStateOf(false) }
+    var helpOpen by remember { mutableStateOf(false) }
+
+    // Bulk actions for multi-select in All apps
+    fun bulkAddToFolder(idx: Int, pkgs: List<String>) {
+        var updated = folders
+        pkgs.forEach { pkg ->
+            updated = updated.mapIndexed { i, f ->
+                if (i == idx && !f.apps.contains(pkg) && f.apps.size < StartFolders.CAPACITY) {
+                    f.copy(apps = f.apps + pkg)
+                } else f
+            }
+        }
+        folders = updated
+        scope.launch {
+            com.neversoft.launcher.data.AppSettings.setStartFolders(context, StartFolders.serialize(updated))
+        }
+        android.widget.Toast.makeText(context, "Added to ${updated[idx].name}", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    fun bulkAddToDesktop(pkgs: List<String>) {
+        scope.launch {
+            runCatching {
+                val raw = com.neversoft.launcher.data.AppSettings.desktopItemsFlow(context).first()
+                val arr = if (raw.isBlank()) JSONArray() else JSONArray(raw)
+                val existing = HashSet<String>()
+                for (i in 0 until arr.length()) existing.add(arr.getJSONObject(i).optString("id"))
+                val byPkg = apps.associateBy { it.packageName }
+                var added = 0
+                pkgs.forEach { pkg ->
+                    val id = "app_$pkg"
+                    if (!existing.contains(id)) {
+                        byPkg[pkg]?.let { app ->
+                            arr.put(
+                                org.json.JSONObject()
+                                    .put("id", id).put("kind", "app")
+                                    .put("label", app.label).put("pkg", pkg),
+                            )
+                            added++
+                        }
+                    }
+                }
+                if (added > 0) com.neversoft.launcher.data.AppSettings.setDesktopItems(context, arr.toString())
+                android.widget.Toast.makeText(
+                    context,
+                    if (added > 0) "Added $added to desktop" else "Already on desktop",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
+
+    fun bulkAddToQuick(pkgs: List<String>) {
+        scope.launch {
+            val current = runCatching {
+                val arr = JSONArray(com.neversoft.launcher.data.AppSettings.quickAppsFlow(context).first())
+                List(arr.length()) { arr.getString(it) }
+            }.getOrDefault(emptyList())
+            val updated = (current + pkgs).distinct().take(6)
+            com.neversoft.launcher.data.AppSettings.setQuickApps(context, JSONArray(updated).toString())
+            android.widget.Toast.makeText(
+                context, "Quick apps: ${updated.size}/6", android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
 
     // Per-app Start-menu pinned-tile sizes (1..5), on the Start menu's own scale
     val startIconSizesJson by com.neversoft.launcher.data.AppSettings
@@ -485,6 +552,10 @@ fun StartMenu(
                         },
                         onResetIcon = { pkg -> resetAppIcon(pkg) },
                         hasCustomIcon = { pkg -> overriddenPkgs.contains(pkg) },
+                        onBulkToFolder = { idx, pkgs -> bulkAddToFolder(idx, pkgs) },
+                        onBulkToDesktop = { pkgs -> bulkAddToDesktop(pkgs) },
+                        onBulkToQuick = { pkgs -> bulkAddToQuick(pkgs) },
+                        onBulkPin = { pkgs -> setPins((pins + pkgs).distinct()) },
                     )
                     StartView.SEARCH -> SearchResultsView(
                         query = query, results = results, apps = apps,
@@ -525,6 +596,15 @@ fun StartMenu(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
+                        Icons.AutoMirrored.Outlined.HelpOutline, "Help",
+                        Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { helpOpen = true }
+                            .padding(10.dp),
+                        tint = theme.text,
+                    )
+                    Icon(
                         Icons.Filled.Folder, "File Explorer",
                         Modifier
                             .size(38.dp)
@@ -563,6 +643,11 @@ fun StartMenu(
                 onConfirm = { pkgs -> setPins((pins + pkgs).distinct()) },
                 onDismiss = { addAppsOpen = false },
             )
+        }
+
+        // Guided help book
+        if (helpOpen) {
+            HelpDialog(onDismiss = { helpOpen = false })
         }
 
         // Power flyout
@@ -1172,10 +1257,35 @@ private fun AllAppsView(
     onChangeIcon: (String) -> Unit,
     onResetIcon: (String) -> Unit,
     hasCustomIcon: (String) -> Boolean,
+    onBulkToFolder: (Int, List<String>) -> Unit,
+    onBulkToDesktop: (List<String>) -> Unit,
+    onBulkToQuick: (List<String>) -> Unit,
+    onBulkPin: (List<String>) -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
+    // Multi-select mode: check several apps, then move them all at once
+    var selecting by remember { mutableStateOf(false) }
+    val selected = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     Column(Modifier.fillMaxSize().padding(bottom = 10.dp)) {
-        SectionHeader("All apps", "Back", onBack)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (selecting) "Selected: ${selected.size}" else "All apps",
+                color = theme.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            HeaderChip(
+                if (selecting) "Done" else "Select",
+                if (selecting) Icons.Outlined.Check else Icons.Outlined.Add,
+            ) {
+                if (selecting) selected.clear()
+                selecting = !selecting
+            }
+            Spacer(Modifier.width(8.dp))
+            HeaderChip("Back", Icons.Outlined.ChevronRight, onBack)
+        }
         Spacer(Modifier.height(8.dp))
         val grouped = remember(apps) {
             apps.groupBy { app ->
@@ -1195,15 +1305,21 @@ private fun AllAppsView(
                     var menuOpen by remember(app.packageName) { mutableStateOf(false) }
                     var folderChooser by remember(app.packageName) { mutableStateOf(false) }
                     val isPinned = pins.contains(app.packageName)
+                    val isChecked = selected.contains(app.packageName)
                     Box {
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(4.dp))
-                                .pointerInput(app.packageName) {
+                                .pointerInput(app.packageName, selecting) {
                                     detectTapGestures(
-                                        onTap = { onLaunch(app) },
-                                        onLongPress = { menuOpen = true },
+                                        onTap = {
+                                            if (selecting) {
+                                                if (isChecked) selected.remove(app.packageName)
+                                                else selected.add(app.packageName)
+                                            } else onLaunch(app)
+                                        },
+                                        onLongPress = { if (!selecting) menuOpen = true },
                                     )
                                 }
                                 .padding(horizontal = 12.dp, vertical = 7.dp),
@@ -1223,7 +1339,22 @@ private fun AllAppsView(
                             Text(
                                 app.label, color = theme.text, fontSize = 13.sp,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
                             )
+                            if (selecting) {
+                                Box(
+                                    Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isChecked) theme.accent else theme.card)
+                                        .border(1.dp, theme.stroke, CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (isChecked) {
+                                        Icon(Icons.Outlined.Check, null, Modifier.size(13.dp), tint = theme.accentText)
+                                    }
+                                }
+                            }
                         }
                         DropdownMenu(
                             expanded = menuOpen,
@@ -1307,6 +1438,30 @@ private fun AllAppsView(
                 }
             }
         }
+
+        // Bulk action bar: move every checked app somewhere in one tap
+        if (selecting && selected.isNotEmpty()) {
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ChipButton("→ Desktop") {
+                    onBulkToDesktop(selected.toList()); selected.clear(); selecting = false
+                }
+                ChipButton("→ Pin to Start") {
+                    onBulkPin(selected.toList()); selected.clear(); selecting = false
+                }
+                ChipButton("→ Quick apps") {
+                    onBulkToQuick(selected.toList()); selected.clear(); selecting = false
+                }
+                folders.forEachIndexed { index, folder ->
+                    ChipButton("→ ${folder.name}") {
+                        onBulkToFolder(index, selected.toList()); selected.clear(); selecting = false
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1379,4 +1534,136 @@ private fun deviceUserName(context: Context): String =
         .getOrNull()
         ?.takeIf { it.isNotBlank() }
         ?: Build.MODEL
+
+// ————— Guided help book (the "?" in the Start menu footer) —————
+
+private data class HelpSection(val title: String, val body: String)
+
+private val HELP_SECTIONS = listOf(
+    HelpSection(
+        "The basics",
+        "NeverSoft 11 is a Windows 11-style shell for your phone. The taskbar " +
+            "runs along the bottom: Start button, Search (opens Spotlight when " +
+            "installed), Task View, the Quick apps folder, your pinned apps, " +
+            "then battery and clock. Tap the thin sliver at the far right to " +
+            "minimize everything and show the desktop.",
+    ),
+    HelpSection(
+        "Desktop icons",
+        "Tap an icon to open it. Click and HOLD an icon and its menu pops up — " +
+            "Open, Size (5 levels, up to half the screen), App info, Rename, " +
+            "Change icon (any photo — works on the Recycle Bin too), Remove, " +
+            "Uninstall. Hold and DRAG to move an icon; it snaps to the grid.",
+    ),
+    HelpSection(
+        "Adding apps",
+        "Hold empty desktop space → Add apps: check as many apps as you want " +
+            "and they're placed on free grid cells automatically. The same menu " +
+            "has Core apps (toggle Recycle Bin, File Explorer, Browser, This PC, " +
+            "Settings), New folder, and Config & permissions.",
+    ),
+    HelpSection(
+        "Start menu",
+        "Pinned apps live at the top — use the Add apps chip to pin more, or " +
+            "long-press a tile to unpin, pin to taskbar, or set its Size. Below " +
+            "sit 4 folders, then rows of recent apps and files. Tap a folder to " +
+            "open it; from there you can rename it or give it a photo.",
+    ),
+    HelpSection(
+        "Folders & bulk moves",
+        "In All apps, long-press any app → Add to folder to file it into one of " +
+            "the 4 Start folders (4 apps each). Or tap Select at the top, check " +
+            "several apps at once, and use the arrow buttons to send them all to " +
+            "the desktop, Start pins, Quick apps, or a folder in one tap.",
+    ),
+    HelpSection(
+        "Extra desktops & Work",
+        "Tap the Task View button (two overlapping squares) on the taskbar. At " +
+            "the bottom: Desktop 1, New desktop (add up to 2 blank pages), and " +
+            "Work — a separate desktop you can lock with a PIN like a secure " +
+            "folder. First entry offers to set the PIN; after that it's required " +
+            "every time.",
+    ),
+    HelpSection(
+        "Quick apps",
+        "The little folder on the taskbar holds up to 6 favorites. Fill it from " +
+            "All apps → long-press → Add to Quick apps. Tap an app inside to " +
+            "launch; long-press to remove.",
+    ),
+    HelpSection(
+        "Make it yours",
+        "Settings → Personalization: 6 themes (Dark, Light, MacBook with real " +
+            "traffic-light window buttons, Glass, Metallic, Nev 7 Aero), custom " +
+            "wallpaper with fit control, a custom Start button image, and icon " +
+            "packs. Long-press any app in All apps → Change icon for a per-app " +
+            "photo icon.",
+    ),
+    HelpSection(
+        "Windows",
+        "Apps like File Explorer and Settings open in real windows: drag the " +
+            "title bar (or long-press anywhere) to move, drag the bottom-right " +
+            "button to resize, and use the caption buttons to minimize, " +
+            "maximize, or close. The Start menu and calendar resize from their " +
+            "corner grips, and remember their size.",
+    ),
+    HelpSection(
+        "Permissions",
+        "Hold empty desktop space → Config & permissions to see every " +
+            "permission with a green/red dot — each row jumps straight to the " +
+            "exact system page: Usage access, All-files access, Contacts & " +
+            "media, Notifications, and Default home app.",
+    ),
+    HelpSection(
+        "Tips & tricks",
+        "• Long-press empty taskbar space to pin apps to it fast.\n" +
+            "• Size 5 icons make great photo widgets when paired with Change icon.\n" +
+            "• The clock opens the calendar + notifications panel; battery opens quick settings.\n" +
+            "• Search box in Start finds apps, settings, and files as you type.\n" +
+            "• If anything crashes, the report screen shows the real error and " +
+            "saves it to Downloads/neversoft11_crash_log.txt.",
+    ),
+)
+
+@Composable
+private fun HelpDialog(onDismiss: () -> Unit) {
+    val theme = LocalLauncherTheme.current
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .width(340.dp)
+                .heightIn(max = 560.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(theme.windowSurface)
+                .border(1.dp, theme.stroke, RoundedCornerShape(10.dp))
+                .padding(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.AutoMirrored.Outlined.HelpOutline, null,
+                    Modifier.size(20.dp), tint = theme.accent,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("NeverSoft 11 guide", color = theme.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                ChipButton("Close", onDismiss)
+            }
+            Spacer(Modifier.height(10.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                HELP_SECTIONS.forEach { section ->
+                    Text(section.title, color = theme.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        section.body, color = theme.text, fontSize = 12.sp, lineHeight = 17.sp,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                }
+            }
+        }
+    }
+}
 

@@ -29,7 +29,12 @@ object AppSettings {
     val KEY_START_ICON_SIZES          = stringPreferencesKey("start_icon_sizes")
     val KEY_DESKTOP_ITEMS_2           = stringPreferencesKey("desktop_items_2")
     val KEY_DESKTOP_ICON_POSITIONS_2  = stringPreferencesKey("desktop_icon_positions_2")
+    val KEY_DESKTOP_ITEMS_3           = stringPreferencesKey("desktop_items_3")
+    val KEY_DESKTOP_ICON_POSITIONS_3  = stringPreferencesKey("desktop_icon_positions_3")
+    val KEY_DESKTOP_ITEMS_4           = stringPreferencesKey("desktop_items_4")
+    val KEY_DESKTOP_ICON_POSITIONS_4  = stringPreferencesKey("desktop_icon_positions_4")
     val KEY_WORK_PIN                  = stringPreferencesKey("work_profile_pin")
+    val KEY_EXTRA_PAGES               = stringPreferencesKey("extra_desktop_pages")
 
     fun themeFlow(context: Context): Flow<String> =
         context.dataStore.data.map { it[KEY_LAUNCHER_THEME] ?: "DARK" }
@@ -60,17 +65,34 @@ object AppSettings {
     suspend fun setWallpaperImage(context: Context, path: String) =
         context.dataStore.edit { it[KEY_LAUNCHER_WALLPAPER_IMAGE] = path }
 
+    private fun itemsKeyFor(page: Int) = when (page) {
+        2 -> KEY_DESKTOP_ITEMS_2
+        3 -> KEY_DESKTOP_ITEMS_3
+        4 -> KEY_DESKTOP_ITEMS_4
+        else -> KEY_DESKTOP_ITEMS
+    }
+
+    private fun positionsKeyFor(page: Int) = when (page) {
+        2 -> KEY_DESKTOP_ICON_POSITIONS_2
+        3 -> KEY_DESKTOP_ICON_POSITIONS_3
+        4 -> KEY_DESKTOP_ICON_POSITIONS_4
+        else -> KEY_DESKTOP_ICON_POSITIONS
+    }
+
     // Desktop icons: "" = never seeded, otherwise a JSON array of items.
-    // Page 1 is the main desktop; page 2 is the "Work" desktop.
+    // Page 1 = main desktop, page 2 = "Work", pages 3-4 = extra blank pages.
     fun desktopItemsFlow(context: Context, page: Int = 1): Flow<String> =
-        context.dataStore.data.map {
-            it[if (page == 2) KEY_DESKTOP_ITEMS_2 else KEY_DESKTOP_ITEMS] ?: ""
-        }
+        context.dataStore.data.map { it[itemsKeyFor(page)] ?: "" }
 
     suspend fun setDesktopItems(context: Context, json: String, page: Int = 1) =
-        context.dataStore.edit {
-            it[if (page == 2) KEY_DESKTOP_ITEMS_2 else KEY_DESKTOP_ITEMS] = json
-        }
+        context.dataStore.edit { it[itemsKeyFor(page)] = json }
+
+    // Number of extra blank desktop pages the user added (0..2)
+    fun extraPagesFlow(context: Context): Flow<Int> =
+        context.dataStore.data.map { (it[KEY_EXTRA_PAGES] ?: "0").toIntOrNull()?.coerceIn(0, 2) ?: 0 }
+
+    suspend fun setExtraPages(context: Context, count: Int) =
+        context.dataStore.edit { it[KEY_EXTRA_PAGES] = count.coerceIn(0, 2).toString() }
 
     // Work-profile lock PIN ("" = not locked)
     fun workPinFlow(context: Context): Flow<String> =
@@ -189,12 +211,8 @@ object AppSettings {
         context.dataStore.edit { it[KEY_LAUNCHER_START_PINS] = json }
 
     fun desktopIconPositionsFlow(context: Context, page: Int = 1): Flow<String> =
-        context.dataStore.data.map {
-            it[if (page == 2) KEY_DESKTOP_ICON_POSITIONS_2 else KEY_DESKTOP_ICON_POSITIONS] ?: "{}"
-        }
+        context.dataStore.data.map { it[positionsKeyFor(page)] ?: "{}" }
 
     suspend fun setDesktopIconPositions(context: Context, json: String, page: Int = 1) =
-        context.dataStore.edit {
-            it[if (page == 2) KEY_DESKTOP_ICON_POSITIONS_2 else KEY_DESKTOP_ICON_POSITIONS] = json
-        }
+        context.dataStore.edit { it[positionsKeyFor(page)] = json }
 }

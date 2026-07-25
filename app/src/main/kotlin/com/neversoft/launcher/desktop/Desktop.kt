@@ -181,9 +181,9 @@ fun Desktop(
                 }.getOrNull()
             }
             if (parsed == null) {
-                // First run: page 1 seeds the built-in shell icons; the Work
-                // desktop (page 2) starts empty.
-                if (page == 2) { items = emptyList(); itemsLoaded = true }
+                // First run: page 1 seeds the built-in shell icons; every
+                // other page (Work, extra pages) starts empty.
+                if (page != 1) { items = emptyList(); itemsLoaded = true }
                 else if (!itemsLoaded) persistItems(BUILTINS)
             } else {
                 // Drop shortcuts to apps that were uninstalled
@@ -528,7 +528,11 @@ fun Desktop(
     // Multi-select app picker: add one or more apps to the desktop at once
     if (appPickerOpen) {
         com.neversoft.launcher.apps.AppPickerDialog(
-            title = if (page == 2) "Add apps to Work desktop" else "Add apps to desktop",
+            title = when (page) {
+                2 -> "Add apps to Work desktop"
+                1 -> "Add apps to desktop"
+                else -> "Add apps to Desktop ${page - 1}"
+            },
             apps = pickerApps,
             onConfirm = { pkgs ->
                 val byPkg = pickerApps.associateBy { it.packageName }
@@ -887,6 +891,13 @@ private fun ConfigPermissionsDialog(
                     ),
                 )
             }
+            val notifsGranted = remember { hasNotificationsPermission(context) }
+            PermissionLink("Notifications", "Allow NeverSoft to post alerts", notifsGranted) {
+                open(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
+                )
+            }
             PermissionLink("Default home app", "Make NeverSoft your launcher", isDefaultHome) {
                 open(Intent(Settings.ACTION_HOME_SETTINGS))
             }
@@ -955,6 +966,9 @@ private fun hasUsageAccess(context: android.content.Context): Boolean = runCatch
 private fun hasAllFilesAccess(): Boolean =
     android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R ||
         Environment.isExternalStorageManager()
+
+private fun hasNotificationsPermission(context: android.content.Context): Boolean =
+    androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
 
 private fun hasContactsPermission(context: android.content.Context): Boolean =
     androidx.core.content.ContextCompat.checkSelfPermission(

@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Icon
@@ -54,6 +55,8 @@ fun TaskView(
     currentDesktop: Int = 1,
     onSwitchDesktop: (Int) -> Unit = {},
     workLocked: Boolean = false,
+    extraPages: Int = 0,
+    onAddPage: () -> Unit = {},
 ) {
     val theme = LocalLauncherTheme.current
     Box(
@@ -86,7 +89,8 @@ fun TaskView(
             }
         }
 
-        // Desktop switcher, bottom-center (like Win11's Task View)
+        // Desktop switcher, bottom-center (like Win11's Task View).
+        // Order: Desktop 1, extra pages, + Add page, then Work (always last).
         Row(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -95,6 +99,16 @@ fun TaskView(
         ) {
             DesktopCard("Desktop 1", selected = currentDesktop == 1, locked = false) {
                 onSwitchDesktop(1)
+            }
+            // Extra blank pages use internal ids 3 and 4
+            for (i in 0 until extraPages) {
+                val page = 3 + i
+                DesktopCard("Desktop ${2 + i}", selected = currentDesktop == page, locked = false) {
+                    onSwitchDesktop(page)
+                }
+            }
+            if (extraPages < 2) {
+                AddPageCard(onAddPage)
             }
             DesktopCard("Work", selected = currentDesktop == 2, locked = workLocked) {
                 onSwitchDesktop(2)
@@ -126,6 +140,26 @@ private fun DesktopCard(label: String, selected: Boolean, locked: Boolean, onCli
         }
         Spacer(Modifier.height(5.dp))
         Text(label, color = Color.White, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun AddPageCard(onClick: () -> Unit) {
+    val theme = LocalLauncherTheme.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .size(width = 96.dp, height = 58.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(1.dp, Color.White.copy(0.3f), RoundedCornerShape(6.dp))
+                .clickable { onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Add, "Add page", Modifier.size(22.dp), tint = Color.White)
+        }
+        Spacer(Modifier.height(5.dp))
+        Text("New desktop", color = Color.White, fontSize = 11.sp)
     }
 }
 

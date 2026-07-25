@@ -163,7 +163,7 @@ data class StartFolder(val name: String, val apps: List<String>, val image: Stri
 
 object StartFolders {
     const val COUNT = 4
-    const val CAPACITY = 4
+    const val CAPACITY = 10
 
     fun parse(json: String): List<StartFolder> {
         val parsed = runCatching {

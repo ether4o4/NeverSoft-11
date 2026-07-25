@@ -1032,17 +1032,20 @@ private fun PinnedView(
                         color = theme.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
                     )
                 } else {
-                    Row(Modifier.fillMaxWidth()) {
-                        folderApps.forEach { app ->
-                            Box(Modifier.weight(1f)) {
-                                PinnedAppTile(
-                                    app = app, isDockPinned = false,
-                                    onClick = { openFolder = null; onLaunch(app) },
-                                    onUnpin = {}, onToggleDockPin = {},
-                                )
+                    // Up to 10 apps, laid out 4 per row
+                    folderApps.chunked(4).forEach { rowApps ->
+                        Row(Modifier.fillMaxWidth()) {
+                            rowApps.forEach { app ->
+                                Box(Modifier.weight(1f)) {
+                                    PinnedAppTile(
+                                        app = app, isDockPinned = false,
+                                        onClick = { openFolder = null; onLaunch(app) },
+                                        onUnpin = {}, onToggleDockPin = {},
+                                    )
+                                }
                             }
+                            repeat(4 - rowApps.size) { Spacer(Modifier.weight(1f)) }
                         }
-                        repeat(StartFolders.CAPACITY - folderApps.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }

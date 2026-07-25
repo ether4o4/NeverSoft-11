@@ -299,7 +299,21 @@ fun ShellScreen(
 
         Taskbar(
             onStartClick = { flyout = if (flyout == Flyout.START) Flyout.NONE else Flyout.START },
-            onSearchClick = { flyout = if (flyout == Flyout.SEARCH) Flyout.NONE else Flyout.SEARCH },
+            onSearchClick = {
+                // The taskbar magnifier opens NeverSoft Spotlight (device-wide
+                // search app) when installed; otherwise fall back to the
+                // built-in Start search so the button is never dead.
+                val spotlight = context.packageManager
+                    .getLaunchIntentForPackage("com.neversoft.spotlight")
+                if (spotlight != null) {
+                    flyout = Flyout.NONE
+                    runCatching {
+                        context.startActivity(spotlight.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                } else {
+                    flyout = if (flyout == Flyout.SEARCH) Flyout.NONE else Flyout.SEARCH
+                }
+            },
             onTaskViewClick = {
                 taskViewVisible = !taskViewVisible
                 flyout = Flyout.NONE

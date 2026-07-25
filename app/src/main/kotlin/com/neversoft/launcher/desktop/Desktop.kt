@@ -223,9 +223,11 @@ fun Desktop(
             items.mapNotNull { item ->
                 // Per-item custom image wins for ANY icon (Recycle Bin included);
                 // app shortcuts then fall back to override/pack/system icons.
+                // Decoded at 512px so icons stay crisp even at the largest
+                // size level (half the screen wide).
                 val custom = item.iconPath
                     .takeIf { it.isNotEmpty() && File(it).exists() }
-                    ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 168) }
+                    ?.let { com.neversoft.launcher.files.ImageStore.decodeSampled(it, 512) }
                 val bmp = custom ?: item.pkg?.let {
                     InstalledAppsRepository.loadIcon(context, iconPack, it, iconOverrides[it])
                 }

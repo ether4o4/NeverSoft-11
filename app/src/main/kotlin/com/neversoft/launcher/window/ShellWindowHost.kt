@@ -104,7 +104,7 @@ fun ShellWindowCard(
     androidx.compose.runtime.LaunchedEffect(Unit) {
         spawn.animateTo(
             1f,
-            androidx.compose.animation.core.tween(150, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            androidx.compose.animation.core.tween(120, easing = androidx.compose.animation.core.FastOutSlowInEasing),
         )
     }
 

@@ -18,8 +18,29 @@ data class RecentFile(val file: File, val name: String)
 // Data sources for the Start-menu recent rows. All resolved off the main thread.
 object StartData {
 
+    // Short-lived memo so reopening the Start menu doesn't re-run UsageStats /
+    // PackageManager / MediaStore / directory scans every time — the rows
+    // render instantly and the queries run at most once a minute.
+    private const val MEMO_TTL_MS = 60_000L
+    private val memo = HashMap<String, Pair<Long, Any?>>()
+
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun <T> memoized(key: String, block: suspend () -> T): T {
+        val now = System.currentTimeMillis()
+        synchronized(memo) {
+            memo[key]?.let { (at, value) -> if (now - at < MEMO_TTL_MS) return value as T }
+        }
+        val value = block()
+        synchronized(memo) {
+            if (memo.size > 40) memo.clear()
+            memo[key] = now to value
+        }
+        return value
+    }
+
     // Most-recently-used apps (needs Usage Access, which onboarding requests).
     suspend fun recentApps(context: Context, allApps: List<InstalledApp>, limit: Int): List<InstalledApp> =
+        memoized("recentApps|$limit|${allApps.size}") {
         withContext(Dispatchers.IO) {
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
                 ?: return@withContext emptyList()
@@ -36,9 +57,11 @@ object StartData {
                 .distinctBy { it.packageName }
                 .take(limit)
         }
+        }
 
     // Apps by most-recent install time.
     suspend fun recentlyInstalledApps(context: Context, allApps: List<InstalledApp>, limit: Int): List<InstalledApp> =
+        memoized("recentInstalled|$limit|${allApps.size}") {
         withContext(Dispatchers.IO) {
             val pm = context.packageManager
             allApps
@@ -50,14 +73,18 @@ object StartData {
                 .map { it.first }
                 .take(limit)
         }
+        }
 
     // Files most-recently created/modified across common directories.
-    suspend fun recentlyAddedFiles(limit: Int): List<RecentFile> = withContext(Dispatchers.IO) {
-        scanDirs()
-            .sortedByDescending { it.lastModified() }
-            .take(limit)
-            .map { RecentFile(it, it.name) }
-    }
+    suspend fun recentlyAddedFiles(limit: Int): List<RecentFile> =
+        memoized("recentAdded|$limit") {
+        withContext(Dispatchers.IO) {
+            scanDirs()
+                .sortedByDescending { it.lastModified() }
+                .take(limit)
+                .map { RecentFile(it, it.name) }
+        }
+        }
 
     // Files the user opened through the launcher (persisted), newest first.
     suspend fun recentlyOpenedFiles(context: Context, limit: Int): List<RecentFile> =
@@ -85,7 +112,8 @@ object StartData {
         context: Context,
         sortColumn: String,
         limit: Int,
-    ): List<RecentFile> = withContext(Dispatchers.IO) {
+    ): List<RecentFile> = memoized("media|$sortColumn|$limit") {
+        withContext(Dispatchers.IO) {
         val out = mutableListOf<RecentFile>()
         runCatching {
             val uri = MediaStore.Files.getContentUri("external")
@@ -111,6 +139,7 @@ object StartData {
                 }
         }
         out
+    }
     }
 
     // Convenience: fully load the app list then a recent slice.

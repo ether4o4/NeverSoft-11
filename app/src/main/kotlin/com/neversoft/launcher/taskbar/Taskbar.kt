@@ -104,11 +104,15 @@ fun Taskbar(
     var dateText by remember { mutableStateOf(formatDate()) }
     var batteryPct by remember { mutableIntStateOf(readBattery(context)) }
     LaunchedEffect(Unit) {
+        // The clock shows minute precision, so wake exactly once per minute
+        // (aligned to the minute boundary) instead of polling every 5s —
+        // 12x fewer wakeups, meaningfully kinder to the battery.
         while (true) {
             timeText = formatTime()
             dateText = formatDate()
             batteryPct = readBattery(context)
-            kotlinx.coroutines.delay(5_000)
+            val now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(60_000 - (now % 60_000) + 20)
         }
     }
 

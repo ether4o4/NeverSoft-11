@@ -407,7 +407,7 @@ fun Desktop(
                     DesktopIconWithMenu(
                         item = item,
                         appIcon = appIcons[item.id],
-                        iconSizeDp = pageWidthDp * ICON_SIZE_FRACTIONS[item.size - 1],
+                        iconSizeDp = (pageWidthDp * ICON_SIZE_FRACTIONS[item.size - 1]).coerceIn(28.dp, 256.dp),
                         onSetSize = { level -> setSize(item, level) },
                         modifier = Modifier
                             .offset { IntOffset(pos.x.roundToInt(), pos.y.roundToInt()) },

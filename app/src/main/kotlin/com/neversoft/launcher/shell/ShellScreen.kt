@@ -96,7 +96,8 @@ private fun parseSize(raw: String): DpSize? = raw.split(",")
     .takeIf { it.size == 2 }
     ?.let { parts ->
         val w = parts[0].toFloatOrNull() ?: return null
-        val h = parts[1].toFloatOrNull() ?: return null
+          val h = parts[1].toFloatOrNull() ?: return null
+          if (!w.isFinite() || !h.isFinite() || w <= 0 || h <= 0) return null
         DpSize(w.dp, h.dp)
     }
 

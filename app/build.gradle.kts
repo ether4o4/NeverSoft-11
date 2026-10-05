@@ -60,9 +60,12 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(platform(libs.compose.bom))

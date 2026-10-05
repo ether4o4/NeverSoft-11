@@ -146,7 +146,7 @@ fun ShellWindowCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp)
+                    .height(48.dp)
                     .pointerInput(isMaximized) {
                         detectDragGestures(
                             onDragStart = { onFocus() },

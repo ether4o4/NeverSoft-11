@@ -57,6 +57,7 @@ object InstalledAppsRepository {
                 val icon = synchronized(iconMemo) { iconMemo[memoKey] } ?: runCatching {
                     if (override != null) {
                         ImageStore.decodeSampled(override, ICON_SIZE_PX)?.asImageBitmap()
+                            ?: resolveInfo.loadIcon(pm).toBitmap(ICON_SIZE_PX, ICON_SIZE_PX).asImageBitmap()
                     } else {
                         IconPacks.getIcon(context, iconPack, pkg, activity)?.asImageBitmap()
                             ?: resolveInfo.loadIcon(pm).toBitmap(ICON_SIZE_PX, ICON_SIZE_PX).asImageBitmap()

@@ -9,6 +9,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,19 +83,21 @@ fun SettingsWindow(
     val theme = LocalLauncherTheme.current
     var page by remember { mutableStateOf(SettingsPage.PERSONALIZATION) }
 
-    Row(modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
+    val compact = maxWidth < 480.dp
+    Row(Modifier.fillMaxSize()) {
         // Navigation
         Column(
-            Modifier.width(136.dp).fillMaxHeight()
+            Modifier.width(if (compact) 60.dp else 136.dp).fillMaxHeight()
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = 8.dp, horizontal = 5.dp),
         ) {
-            NavItem("Home", Icons.Outlined.Home, page == SettingsPage.HOME) { page = SettingsPage.HOME }
-            NavItem("System", Icons.Outlined.Monitor, page == SettingsPage.SYSTEM) { page = SettingsPage.SYSTEM }
-            NavItem("Personalization", Icons.Outlined.Palette, page == SettingsPage.PERSONALIZATION) {
+            NavItem("Home", Icons.Outlined.Home, page == SettingsPage.HOME, compact) { page = SettingsPage.HOME }
+            NavItem("System", Icons.Outlined.Monitor, page == SettingsPage.SYSTEM, compact) { page = SettingsPage.SYSTEM }
+            NavItem("Personalization", Icons.Outlined.Palette, page == SettingsPage.PERSONALIZATION, compact) {
                 page = SettingsPage.PERSONALIZATION
             }
-            NavItem("Apps", Icons.Outlined.Apps, page == SettingsPage.APPS) { page = SettingsPage.APPS }
+            NavItem("Apps", Icons.Outlined.Apps, page == SettingsPage.APPS, compact) { page = SettingsPage.APPS }
         }
         Box(Modifier.width(1.dp).fillMaxHeight().background(theme.divider))
 
@@ -108,14 +114,16 @@ fun SettingsWindow(
             }
         }
     }
+    }
 }
 
 @Composable
-private fun NavItem(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
+private fun NavItem(label: String, icon: ImageVector, selected: Boolean, compact: Boolean, onClick: () -> Unit) {
     val theme = LocalLauncherTheme.current
     Row(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(if (selected) theme.hover else Color.Transparent)
             .clickable { onClick() }
@@ -131,9 +139,11 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, onClick
         } else {
             Spacer(Modifier.width(9.dp))
         }
-        Icon(icon, null, Modifier.size(15.dp), tint = theme.text)
-        Spacer(Modifier.width(8.dp))
-        Text(label, fontSize = 12.sp, color = theme.text, maxLines = 1)
+        Icon(icon, label, Modifier.size(18.dp), tint = theme.text)
+        if (!compact) {
+            Spacer(Modifier.width(8.dp))
+            Text(label, fontSize = 12.sp, color = theme.text, maxLines = 1)
+        }
     }
 }
 
@@ -234,6 +244,7 @@ private fun SystemPage() {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PersonalizationPage(
     selectedPreset: ThemePreset,
@@ -309,7 +320,7 @@ private fun PersonalizationPage(
         Spacer(Modifier.height(16.dp))
         Text("Wallpaper", color = theme.textSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AccentButton("Choose from Photos", onClick = { wallpaperPicker.launch("image/*") })
             if (wallpaperSet.isNotEmpty()) {
                 SubtleButton("Reset to Bloom", onClick = {
@@ -322,7 +333,7 @@ private fun PersonalizationPage(
             Spacer(Modifier.height(8.dp))
             Text("Wallpaper fit", color = theme.textSecondary, fontSize = 12.sp)
             Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FitOption("Exact screen size", selected = fit == "exact") {
                     scope.launch { AppSettings.setWallpaperFit(context, "exact") }
                 }
@@ -335,7 +346,7 @@ private fun PersonalizationPage(
         Spacer(Modifier.height(16.dp))
         Text("Start button", color = theme.textSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AccentButton("Choose from Photos", onClick = { orbPicker.launch("image/*") })
             if (orbSet.isNotEmpty()) {
                 SubtleButton("Reset to logo", onClick = {
@@ -344,7 +355,20 @@ private fun PersonalizationPage(
             }
         }
 
-        // Icon packs — any installed pack from any launcher ecosystem
+        val startSize by AppSettings.startButtonSizeFlow(context).collectAsState(initial = 32)
+        Spacer(Modifier.height(12.dp))
+        Text("Start icon size: ${startSize}dp", color = theme.textSecondary, fontSize = 12.sp)
+        androidx.compose.material3.Slider(
+            value = startSize.toFloat(),
+            onValueChange = { size -> scope.launch { AppSettings.setStartButtonSize(context, size.toInt()) } },
+            valueRange = 22f..40f, steps = 17,
+        )
+        SubtleButton("Default size", onClick = { scope.launch { AppSettings.setStartButtonSize(context, 32) } })
+        Spacer(Modifier.height(8.dp))
+        Text("Long-press any desktop or Start tile to change its image, size, or reset it.",
+            color = theme.textSecondary, fontSize = 12.sp)
+
+        // Installed packs with a readable appfilter mapping.
         Spacer(Modifier.height(16.dp))
         Text("Icon pack", color = theme.textSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
@@ -355,10 +379,12 @@ private fun PersonalizationPage(
             if (iconPack.isEmpty()) "System icons"
             else packs.firstOrNull { it.packageName == iconPack }?.label ?: iconPack
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AccentButton("Choose icon pack", onClick = {
-                packs = IconPacks.listPacks(context)
-                packPickerOpen = true
+                scope.launch {
+                    packs = kotlinx.coroutines.withContext(Dispatchers.IO) { IconPacks.listPacks(context) }
+                    packPickerOpen = true
+                }
             })
             Text(currentPackLabel, color = theme.text, fontSize = 12.sp)
         }
@@ -369,6 +395,8 @@ private fun PersonalizationPage(
                 Column(
                     Modifier
                         .width(300.dp)
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState())
                         .clip(RoundedCornerShape(8.dp))
                         .background(theme.windowSurface)
                         .border(1.dp, theme.stroke, RoundedCornerShape(8.dp))
@@ -383,7 +411,7 @@ private fun PersonalizationPage(
                     if (packs.isEmpty()) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "No icon packs installed. Install any icon pack app (Nova/ADW/GO compatible) and it will show up here.",
+                            "No supported packs found. Install an exported APK icon pack with appfilter mappings. Icon Pack Studio exports require phone testing; unmatched apps keep their system icons.",
                             color = theme.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
                         )
                     } else {

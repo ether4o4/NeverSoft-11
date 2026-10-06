@@ -50,7 +50,7 @@ jobs:
           tools = sorted(glob.glob(os.environ["ANDROID_HOME"] + "/build-tools/*"))[-1]
           def cert(apk):
               output = subprocess.check_output([tools + "/apksigner", "verify", "--print-certs", str(apk)], text=True)
-              return re.findall(r"Signer #[0-9]+ certificate SHA-256 digest: ([0-9a-fA-F]+)", output)
+              return sorted(set(re.findall(r"(?:Signer #[0-9]+|V[0-9]+ Signer):? certificate SHA-256 digest: ([0-9a-fA-F]+)", output)))
           old_certs, new_certs = cert(old), cert(new)
           assert old_certs and old_certs == new_certs, "Signing identity changed; do not replace the working APK"
           info = dict(prior_apk_sha256=hashlib.sha256(old.read_bytes()).hexdigest(), new_apk_sha256=hashlib.sha256(new.read_bytes()).hexdigest(), signer_certificate_sha256=new_certs, signing_compatible=True, package="com.neversoft.launcher", version_name="2.18.1", version_code=34)
@@ -142,40 +142,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ROLLING_MODE: main
         run: python3 .github/scripts/rolling_apk.py
-  inspect-back-apk:
-    if: github.event_name == 'pull_request' && github.event.label.name == 'inspect-back-apk' && github.head_ref == 'polish/mobile-2026-10-05' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: polish-validation
-          run-id: '37360168622'
-          github-token: ${{ github.token }}
-          path: prior
-      - uses: actions/download-artifact@v4
-        with:
-          name: polish-validation
-          run-id: '37401514046'
-          github-token: ${{ github.token }}
-          path: candidate
-      - name: Inspect public APK certificates and test reports without rebuilding
-        run: |
-          python3 - <<'PY'
-          import glob, hashlib, json, os, pathlib, subprocess
-          tools = sorted(glob.glob(os.environ["ANDROID_HOME"] + "/build-tools/*"))[-1]
-          for label in ("prior", "candidate"):
-              files = glob.glob(label + "/**/app-release.apk", recursive=True)
-              assert len(files) == 1
-              apk = pathlib.Path(files[0])
-              output = subprocess.check_output([tools + "/apksigner", "verify", "--print-certs", str(apk)], text=True)
-              print(json.dumps(dict(label=label, apk_sha256=hashlib.sha256(apk.read_bytes()).hexdigest(), certificate_lines=[line for line in output.splitlines() if "certificate SHA-256 digest:" in line])))
-          for report in glob.glob("candidate/**/StartMenuBackHandlerTest.html", recursive=True):
-              text = pathlib.Path(report).read_text()
-              print("BACK_TEST_REPORT", report)
-              for marker in ("backClosesStartThenDelegatesNextBackToExistingNavigation", "closedStartDoesNotInterceptNormalBack"):
-                  print(marker, marker in text)
-          PY

@@ -7,6 +7,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -120,6 +122,7 @@ fun Taskbar(
     // flat-background removal run OFF the main thread to avoid blocking the UI
     // during the home/overview transition.
     val orbPath by AppSettings.orbImageFlow(context).collectAsState(initial = "")
+    val startButtonSize by AppSettings.startButtonSizeFlow(context).collectAsState(initial = 32)
     var orbBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(orbPath) {
         orbBitmap = withContext(Dispatchers.IO) {
@@ -220,9 +223,9 @@ fun Taskbar(
             Modifier.fillMaxWidth().height(TASKBAR_HEIGHT_DP.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // App cluster, centered in the space before the tray, capped so
+            // Scrollable app cluster stays within the space before the tray so
             // it can never spill under the tray
-            BoxWithConstraints(
+            Box(
                 Modifier.weight(1f).fillMaxHeight()
                     // Long-press (click and hold) empty taskbar space to add apps
                     .pointerInput(Unit) {
@@ -230,13 +233,12 @@ fun Taskbar(
                     },
             ) {
                 // Reserve slots for Start, Search, Task View, and Quick apps
-                val budget = ((maxWidth / 46.dp).toInt() - 4).coerceAtLeast(1)
-                val windowsShown = openWindows.take(minOf(3, budget))
-                val pinsShown = pinnedApps.take((budget - windowsShown.size).coerceAtLeast(0))
+                val windowsShown = openWindows
+                val pinsShown = pinnedApps
                 Row(
-                    Modifier.align(Alignment.Center),
+                    Modifier.align(Alignment.Center).fillMaxWidth().horizontalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
                 ) {
                     TaskbarButton(onClick = onStartClick) {
                         val orb = orbBitmap
@@ -247,12 +249,12 @@ fun Taskbar(
                             Image(
                                 bitmap = orb,
                                 contentDescription = "Start",
-                                modifier = Modifier.size(38.dp).clip(androidx.compose.foundation.shape.CircleShape),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(startButtonSize.dp),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                                 filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
                             )
                         } else {
-                            StartLogo(22.dp)
+                            StartLogo(startButtonSize.dp)
                         }
                     }
                     TaskbarButton(onClick = onSearchClick) {

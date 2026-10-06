@@ -19,6 +19,13 @@ object AppSettings {
     val KEY_START_PINS_SEEDED         = booleanPreferencesKey("start_pins_seeded")
     val KEY_DESKTOP_ITEMS             = stringPreferencesKey("desktop_items")
     val KEY_ICON_PACK                 = stringPreferencesKey("icon_pack")
+    private val KEY_START_BUTTON_SIZE = intPreferencesKey("start_button_size_dp")
+
+    fun startButtonSizeFlow(context: Context): Flow<Int> =
+        context.dataStore.data.map { (it[KEY_START_BUTTON_SIZE] ?: 32).coerceIn(22, 40) }
+
+    suspend fun setStartButtonSize(context: Context, size: Int) =
+        context.dataStore.edit { it[KEY_START_BUTTON_SIZE] = size.coerceIn(22, 40) }
     val KEY_WALLPAPER_FIT             = stringPreferencesKey("wallpaper_fit")
     val KEY_START_MENU_SIZE           = stringPreferencesKey("start_menu_size")
     val KEY_CALENDAR_SIZE             = stringPreferencesKey("calendar_size")
@@ -166,7 +173,7 @@ object AppSettings {
         context.dataStore.edit { prefs ->
             val obj = runCatching { org.json.JSONObject(prefs[KEY_START_ICON_SIZES] ?: "{}") }
                 .getOrDefault(org.json.JSONObject())
-            obj.put(pkg, level)
+            obj.put(pkg, level.coerceIn(1, 5))
             prefs[KEY_START_ICON_SIZES] = obj.toString()
         }
     }
@@ -176,7 +183,7 @@ object AppSettings {
         context.dataStore.edit { prefs ->
             val obj = runCatching { org.json.JSONObject(prefs[KEY_START_ICON_SIZES] ?: "{}") }
                 .getOrDefault(org.json.JSONObject())
-            sizes.forEach { (pkg, level) -> obj.put(pkg, level) }
+            sizes.forEach { (pkg, level) -> obj.put(pkg, level.coerceIn(1, 5)) }
             prefs[KEY_START_ICON_SIZES] = obj.toString()
         }
     }

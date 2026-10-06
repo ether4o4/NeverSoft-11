@@ -9,27 +9,67 @@ import java.io.File
 // Copies user-picked photos into app storage so they survive reboots and
 // permission revocations, and decodes them at a sane size.
 object ImageStore {
-    // Returns the stored file path, or null on failure. Older imports with
-    // the same prefix are deleted.
+    // Validate before publishing; retain prior files because other shortcuts
+    // or persisted settings may still reference them. No URI grant is needed
+    // after this bounded copy completes in app-private storage.
     fun importImage(context: Context, uri: Uri, prefix: String): String? = runCatching {
         val dir = File(context.filesDir, "images").apply { mkdirs() }
-        val target = File(dir, "$prefix-${System.currentTimeMillis()}.img")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
-        } ?: return null
-        dir.listFiles()
-            ?.filter { it.name.startsWith("$prefix-") && it.absolutePath != target.absolutePath }
-            ?.forEach { it.delete() }
-        target.absolutePath
+        val safePrefix = prefix.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(100)
+        val staging = File.createTempFile("import-", ".tmp", dir)
+        val target = File(dir, "$safePrefix-${java.util.UUID.randomUUID()}.png")
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                staging.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= 32L * 1024 * 1024) { "Image exceeds 32 MB" }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            } ?: error("Image is unavailable")
+            require(hasImageHeader(staging)) { "Unsupported image" }
+            val bitmap = decodeSampled(staging.absolutePath, if (prefix == "wallpaper") 2048 else 512)
+                ?: error("Image could not be decoded")
+            try {
+                target.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            } finally { bitmap.recycle() }
+            target.absolutePath
+        } catch (e: Exception) {
+            target.delete()
+            throw e
+        } finally { staging.delete() }
+    }.onFailure {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(context.applicationContext,
+                "Could not import image. Choose a readable image under 32 MB; your previous icon is kept.",
+                android.widget.Toast.LENGTH_LONG).show()
+        }
     }.getOrNull()
+
+    private fun hasImageHeader(file: File): Boolean {
+        val header = ByteArray(16)
+        val count = file.inputStream().use { it.read(header) }
+        if (count < 8) return false
+        fun ascii(start: Int, end: Int) = String(header, start, end - start, Charsets.US_ASCII)
+        return (header[0] == 0x89.toByte() && ascii(1, 4) == "PNG") ||
+            (header[0] == 0xff.toByte() && header[1] == 0xd8.toByte() && header[2] == 0xff.toByte()) ||
+            ascii(0, 4) == "GIF8" || ascii(0, 2) == "BM" ||
+            (count >= 12 && ascii(0, 4) == "RIFF" && ascii(8, 12) == "WEBP") ||
+            (count >= 12 && ascii(4, 8) == "ftyp")
+    }
 
     fun decodeSampled(path: String, targetPx: Int): Bitmap? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0 ||
+            bounds.outWidth.toLong() * bounds.outHeight > 100_000_000L) return null
+        val limit = targetPx.coerceIn(32, 2048)
         var sample = 1
-        while (bounds.outWidth / (sample * 2) >= targetPx ||
-            bounds.outHeight / (sample * 2) >= targetPx
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > limit
         ) {
             sample *= 2
         }

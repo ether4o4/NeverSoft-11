@@ -7,10 +7,8 @@ import android.graphics.Bitmap
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 
-// Loads third-party icon packs. Packs from any launcher ecosystem work:
-// they all ship an appfilter.xml mapping activity components to drawables,
-// discoverable through the standard theme intents (ADW, Nova, Apex, GO,
-// Smart Launcher, ...).
+// Loads installed packs advertising known theme intents and providing an
+// appfilter.xml mapping. Other pack formats need explicit integration/testing.
 object IconPacks {
     data class PackInfo(val packageName: String, val label: String)
 
@@ -50,7 +48,8 @@ object IconPacks {
         val res = cachedRes ?: return null
         if (cachedMap.isEmpty()) return null
 
-        val exactKey = activityName?.let { "ComponentInfo{$appPkg/$it}" }
+        val expandedActivity = activityName?.let { if (it.startsWith(".")) appPkg + it else it }
+        val exactKey = expandedActivity?.let { "ComponentInfo{$appPkg/$it}" }
         val drawableName = (exactKey?.let { cachedMap[it] })
             ?: cachedMap.entries.firstOrNull { it.key.startsWith("ComponentInfo{$appPkg/") }?.value
             ?: return null

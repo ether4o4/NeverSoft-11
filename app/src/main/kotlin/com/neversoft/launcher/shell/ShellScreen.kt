@@ -96,7 +96,8 @@ private fun parseSize(raw: String): DpSize? = raw.split(",")
     .takeIf { it.size == 2 }
     ?.let { parts ->
         val w = parts[0].toFloatOrNull() ?: return null
-        val h = parts[1].toFloatOrNull() ?: return null
+          val h = parts[1].toFloatOrNull() ?: return null
+          if (!w.isFinite() || !h.isFinite() || w <= 0 || h <= 0) return null
         DpSize(w.dp, h.dp)
     }
 
@@ -114,6 +115,11 @@ fun ShellScreen(
     // Virtual desktops: 1 = main, 2 = "Work" (lockable like a secure folder)
     var currentDesktop by remember { mutableStateOf(1) }
     var workPinPrompt by remember { mutableStateOf<String?>(null) } // "enter" | "setup"
+
+    StartMenuBackHandler(
+        visible = flyout == Flyout.START || flyout == Flyout.SEARCH,
+        onDismiss = { flyout = Flyout.NONE },
+    )
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val context = LocalContext.current

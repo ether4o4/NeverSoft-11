@@ -1,0 +1,9 @@
+{
+  "seed_run": 37360168622,
+  "seed_sha": "c983d396b42bff845162330cc77778a4c04b3a5c",
+  "seed_apk_sha": null,
+  "main_path": ".github/workflows/android-ci.yml",
+  "main_artifact": "app-release-apk",
+  "selector": "(^|/)app-release\\.apk$",
+  "asset_prefix": "NeverSoft-11-test"
+}

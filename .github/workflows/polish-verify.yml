@@ -13,6 +13,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
+    permissions:
+      contents: read
+      actions: read
     if: github.event_name == 'pull_request' && github.event.label.name == 'polish-verify' && github.head_ref == 'polish/mobile-2026-10-05' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -26,6 +29,36 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleDebug :app:assembleRelease :app:lintDebug :app:testDebugUnitTest --no-daemon --max-workers=2
+      - name: Download previous verified APK for signing comparison
+        uses: actions/download-artifact@v4
+        with:
+          name: polish-validation
+          run-id: '37360168622'
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/prior-polish
+      - name: Check data-preserving APK update compatibility
+        env:
+          PRIOR_APK_DIRECTORY: ${{ runner.temp }}/prior-polish
+        run: |
+          python3 - <<'PY'
+          import glob, hashlib, json, os, pathlib, re, subprocess
+          prior = glob.glob(os.environ["PRIOR_APK_DIRECTORY"] + "/**/app-release.apk", recursive=True)
+          assert len(prior) == 1, "Expected one previously verified release APK"
+          old = pathlib.Path(prior[0])
+          new = pathlib.Path("app/build/outputs/apk/release/app-release.apk")
+          assert hashlib.sha256(old.read_bytes()).hexdigest() == "af53bf1b7686c411410b3a9beb4892d99fed570be5f027fd45841b90fadca6f5"
+          tools = sorted(glob.glob(os.environ["ANDROID_HOME"] + "/build-tools/*"))[-1]
+          def cert(apk):
+              output = subprocess.check_output([tools + "/apksigner", "verify", "--print-certs", str(apk)], text=True)
+              return re.findall(r"Signer #[0-9]+ certificate SHA-256 digest: ([0-9a-fA-F]+)", output)
+          old_certs, new_certs = cert(old), cert(new)
+          assert old_certs and old_certs == new_certs, "Signing identity changed; do not replace the working APK"
+          info = dict(prior_apk_sha256=hashlib.sha256(old.read_bytes()).hexdigest(), new_apk_sha256=hashlib.sha256(new.read_bytes()).hexdigest(), signer_certificate_sha256=new_certs, signing_compatible=True, package="com.neversoft.launcher", version_name="2.18.1", version_code=34)
+          report = pathlib.Path("app/build/reports/polish/back-fix-compatibility.json")
+          report.parent.mkdir(parents=True, exist_ok=True)
+          report.write_text(json.dumps(info, indent=2) + "\n")
+          print(json.dumps(info))
+          PY
       - name: Upload build and validation artifacts
         if: always()
         uses: actions/upload-artifact@v4

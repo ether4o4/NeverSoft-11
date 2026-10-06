@@ -116,6 +116,11 @@ fun ShellScreen(
     var currentDesktop by remember { mutableStateOf(1) }
     var workPinPrompt by remember { mutableStateOf<String?>(null) } // "enter" | "setup"
 
+    StartMenuBackHandler(
+        visible = flyout == Flyout.START || flyout == Flyout.SEARCH,
+        onDismiss = { flyout = Flyout.NONE },
+    )
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()

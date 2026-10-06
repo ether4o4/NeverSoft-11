@@ -1,5 +1,17 @@
 # NeverSoft 11
 
+
+## Latest polish test APK
+
+[Download the newest verified test APK — rolling release page](https://github.com/ether4o4/NeverSoft-11/releases/tag/polish-test-latest)
+
+This separate prerelease channel contains **test APKs**, with source commit, package/version, native ABI and SHA-256 recorded on the release page. Open **Download newest verified test APK** on that page. Phone runtime testing is incomplete; test signing may differ from an installed/store version. Private repository downloads require GitHub access.
+
+While this PR remains unmerged, a successful **Polish verification** build on `polish/mobile-2026-10-05` refreshes the channel (remove/reapply the `polish-verify` PR label to run verification). The initial download reuses the already verified polish build. After merge, successful **Android CI** builds on `main` also refresh it through `workflow_run`. Only trusted same-repository intended workflows/refs qualify; failed, older or diverging builds leave the working download intact. Versioned APK assets remain available, avoiding a replacement gap. Existing release channels keep their current behavior.
+
+The stable link opens a release page; the highlighted APK filename changes after each accepted build. The channel tag anchors `main`; the release body identifies the actual APK source commit. These README additions and future `main` automation take effect on the default branch only after this PR is merged.
+
+
 A 1:1 Windows 11 OS shell replica for Android — the Windows 11 desktop, taskbar, Start menu, File Explorer, Settings, and lock screen, rebuilt with Fluent design tokens and branded NeverSoft.
 
 ## What's in the shell (v2.0)

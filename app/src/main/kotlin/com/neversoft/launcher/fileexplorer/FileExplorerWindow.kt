@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,19 +65,30 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.runtime.rememberCoroutineScope
+import com.neversoft.launcher.apps.InstalledAppsRepository
+import com.neversoft.launcher.data.AppSettings
+import com.neversoft.launcher.files.DragDropCoordinator
 import com.neversoft.launcher.files.FileOpener
+import com.neversoft.launcher.files.ShortcutStore
 import com.neversoft.launcher.files.Trash
 import com.neversoft.launcher.theme.LocalLauncherTheme
 import com.neversoft.launcher.ui.AccentButton
@@ -85,6 +97,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 private data class Clipboard(val source: File, val isCut: Boolean)
 
@@ -94,9 +107,15 @@ private data class Clipboard(val source: File, val isCut: Boolean)
 // Android's system trash, with Restore support.
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File Explorer") {
+fun FileExplorerWindow(
+    initialPath: String? = null,
+    windowTitle: String = "File Explorer",
+    windowId: String = "file-explorer",
+) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val syncVersion by DragDropCoordinator.changeVersion.collectAsState()
     val home = remember { Environment.getExternalStorageDirectory() }
 
     var currentDir by remember { mutableStateOf(File(initialPath ?: home.absolutePath)) }
@@ -112,17 +131,20 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
     // list /storage itself — even with all-files access — so "This PC"
     // synthesizes the volume list from StorageManager instead of wrongly
     // showing the permission screen.
-    val listing: List<File>? = remember(currentDir, refreshTick) {
+    val listing: List<File>? = remember(currentDir, refreshTick, syncVersion) {
         when {
             inTrash -> emptyList()
             currentDir.absolutePath == "/storage" -> storageVolumeDirs(context)
             else -> currentDir.listFiles()
-                ?.filter { !(it.name.startsWith(".") && it.parentFile?.absolutePath == home.absolutePath) }
+                ?.filter { it.name != ShortcutStore.FILE_NAME && !(it.name.startsWith(".") && it.parentFile?.absolutePath == home.absolutePath) }
                 ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
         }
     }
+    val shortcutEntries: List<ShortcutStore.Entry> = remember(currentDir, refreshTick, syncVersion) {
+        if (inTrash) emptyList() else ShortcutStore.list(currentDir)
+    }
     // Recycle Bin listing (own bin + Android system trash)
-    val binEntries: List<Trash.TrashEntry> = remember(currentDir, refreshTick) {
+    val binEntries: List<Trash.TrashEntry> = remember(currentDir, refreshTick, syncVersion) {
         if (inTrash) Trash.listEntries() else emptyList()
     }
 
@@ -142,6 +164,109 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
 
     val selectedFile = if (inTrash) null else selectedPath?.let { File(it) }?.takeIf { it.exists() }
     val selectedEntry = if (inTrash) binEntries.firstOrNull { it.file.absolutePath == selectedPath } else null
+
+    fun movePhysical(source: File, destinationDir: File): Boolean {
+        if (!source.exists() || !destinationDir.isDirectory) return false
+        if (source.absolutePath == destinationDir.absolutePath) return false
+        if (source.parentFile?.absolutePath == destinationDir.absolutePath) return false
+        if (source.isDirectory && destinationDir.absolutePath.startsWith(source.absolutePath + File.separator)) {
+            return false
+        }
+        val destination = Trash.uniqueName(destinationDir, source.name)
+        return runCatching {
+            if (source.renameTo(destination)) {
+                true
+            } else if (source.copyRecursively(destination)) {
+                if (source.deleteRecursively()) {
+                    true
+                } else {
+                    destination.deleteRecursively()
+                    false
+                }
+            } else {
+                false
+            }
+        }.getOrDefault(false)
+    }
+
+    fun transferToDirectory(source: DragDropCoordinator.Payload, destinationDir: File): Boolean {
+        if (!destinationDir.isDirectory || Trash.isTrash(destinationDir)) return false
+        return when (source) {
+            is DragDropCoordinator.Payload.ExplorerFile ->
+                movePhysical(File(source.path), destinationDir)
+            is DragDropCoordinator.Payload.ExplorerShortcut -> {
+                if (source.directory == destinationDir.absolutePath) return false
+                val inserted = ShortcutStore.add(destinationDir, source.entry)
+                if (!inserted) return false
+                val removed = ShortcutStore.remove(File(source.directory), source.entry.id)
+                if (!removed) {
+                    ShortcutStore.remove(destinationDir, source.entry.id)
+                    false
+                } else true
+            }
+            is DragDropCoordinator.Payload.DesktopShortcut -> {
+                when {
+                    source.packageName != null -> {
+                        val inserted = ShortcutStore.add(
+                            destinationDir,
+                            ShortcutStore.Entry(
+                                id = source.itemId,
+                                label = source.label,
+                                packageName = source.packageName,
+                                iconPath = source.iconPath,
+                            ),
+                        )
+                        if (inserted) {
+                            scope.launch {
+                                AppSettings.removeDesktopItem(context, source.page, source.itemId)
+                                AppSettings.removeDesktopIconPosition(context, source.page, source.itemId)
+                            }
+                        }
+                        inserted
+                    }
+                    source.path != null && (source.kind == "file" || source.kind == "folder") -> {
+                        val moved = movePhysical(File(source.path), destinationDir)
+                        if (moved) {
+                            scope.launch {
+                                AppSettings.removeDesktopItem(context, source.page, source.itemId)
+                                AppSettings.removeDesktopIconPosition(context, source.page, source.itemId)
+                            }
+                        }
+                        moved
+                    }
+                    else -> false
+                }
+            }
+        }
+    }
+
+    fun registerFolderTarget(file: File, bounds: Rect) {
+        val targetId = "explorer-folder-$windowId-${file.absolutePath}"
+        if (file.isDirectory && !inTrash) {
+            DragDropCoordinator.registerTarget(
+                id = targetId,
+                bounds = bounds,
+                priority = 20,
+                ) { payload, _ ->
+                    transferToDirectory(payload, file).also {
+                        if (it) {
+                            refreshTick++
+                            DragDropCoordinator.notifyChanged()
+                        }
+                    }
+                }
+        } else {
+            DragDropCoordinator.unregisterTarget(targetId)
+        }
+    }
+
+    fun beginDrag(payload: DragDropCoordinator.Payload) {
+        DragDropCoordinator.begin(payload)
+    }
+
+    fun finishDrag(position: Offset) {
+        if (DragDropCoordinator.finish(position)) refreshTick++
+    }
 
     Column(Modifier.fillMaxSize()) {
         // ————— Command bar —————
@@ -347,7 +472,30 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(theme.divider))
 
-                Box(Modifier.fillMaxWidth().weight(1f)) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .onGloballyPositioned { coordinates ->
+                            val targetId = "explorer-content-$windowId"
+                            if (!inTrash && currentDir.isDirectory) {
+                                DragDropCoordinator.registerTarget(
+                                    id = targetId,
+                                    bounds = coordinates.boundsInRoot(),
+                                    priority = 0,
+                                ) { payload, _ ->
+                                    transferToDirectory(payload, currentDir).also {
+                                        if (it) {
+                                            refreshTick++
+                                            DragDropCoordinator.notifyChanged()
+                                        }
+                                    }
+                                }
+                            } else {
+                                DragDropCoordinator.unregisterTarget(targetId)
+                            }
+                        },
+                ) {
                     when {
                         inTrash -> if (binEntries.isEmpty()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -386,7 +534,8 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
 
                         listing == null -> PermissionEmptyState()
 
-                        listing.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        listing.isEmpty() && shortcutEntries.isEmpty() ->
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("This folder is empty", color = theme.textSecondary, fontSize = 12.sp)
                         }
 
@@ -408,6 +557,51 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
                                     onLongClick = {
                                         selectedPath = if (isSelected) null else file.absolutePath
                                     },
+                                    onDragStart = {
+                                        beginDrag(
+                                            DragDropCoordinator.Payload.ExplorerFile(
+                                                path = file.absolutePath,
+                                                isDirectory = file.isDirectory,
+                                            ),
+                                        )
+                                    },
+                                    onDragEnd = ::finishDrag,
+                                    onDragCancel = { DragDropCoordinator.cancel() },
+                                    onBoundsChanged = { bounds -> registerFolderTarget(file, bounds) },
+                                    onDisposed = {
+                                        DragDropCoordinator.unregisterTarget(
+                                            "explorer-folder-$windowId-${file.absolutePath}",
+                                        )
+                                    },
+                                )
+                            }
+                            items(shortcutEntries, key = { "shortcut-${it.id}" }) { entry ->
+                                FileListRow(
+                                    icon = Icons.Outlined.Android,
+                                    iconTint = theme.accent,
+                                    name = entry.label,
+                                    subtitleUnder = "Application shortcut",
+                                    date = currentDir.lastModified(),
+                                    sizeText = "",
+                                    isSelected = selectedPath == "shortcut:${entry.id}",
+                                    onClick = { InstalledAppsRepository.launch(context, entry.packageName) },
+                                    onLongClick = {
+                                        selectedPath = if (selectedPath == "shortcut:${entry.id}") {
+                                            null
+                                        } else {
+                                            "shortcut:${entry.id}"
+                                        }
+                                    },
+                                    onDragStart = {
+                                        beginDrag(
+                                            DragDropCoordinator.Payload.ExplorerShortcut(
+                                                directory = currentDir.absolutePath,
+                                                entry = entry,
+                                            ),
+                                        )
+                                    },
+                                    onDragEnd = ::finishDrag,
+                                    onDragCancel = { DragDropCoordinator.cancel() },
                                 )
                             }
                         }
@@ -419,7 +613,7 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val count = if (inTrash) binEntries.size else listing?.size ?: 0
+                    val count = if (inTrash) binEntries.size else (listing?.size ?: 0) + shortcutEntries.size
                     Text(
                         "$count items" +
                             (if (selectedPath != null) "   |   1 item selected" else ""),
@@ -427,6 +621,13 @@ fun FileExplorerWindow(initialPath: String? = null, windowTitle: String = "File 
                     )
                 }
             }
+        }
+    }
+
+    androidx.compose.runtime.DisposableEffect(windowId, currentDir) {
+        onDispose {
+            DragDropCoordinator.unregisterTargets("explorer-content-$windowId")
+            DragDropCoordinator.unregisterTargets("explorer-folder-$windowId-")
         }
     }
 
@@ -491,13 +692,44 @@ private fun FileListRow(
     isSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onDragStart: (() -> Unit)? = null,
+    onDragEnd: ((Offset) -> Unit)? = null,
+    onDragCancel: (() -> Unit)? = null,
+    onBoundsChanged: ((Rect) -> Unit)? = null,
+    onDisposed: (() -> Unit)? = null,
 ) {
     val theme = LocalLauncherTheme.current
+    var rowTopLeft by remember { mutableStateOf(Offset.Zero) }
+    var lastDragPosition by remember { mutableStateOf(Offset.Zero) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { onDisposed?.invoke() }
+    }
     Row(
         Modifier
             .fillMaxWidth()
+            .onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInRoot()
+                rowTopLeft = bounds.topLeft
+                onBoundsChanged?.invoke(bounds)
+            }
             .background(if (isSelected) theme.accent.copy(alpha = 0.18f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .pointerInput(onDragStart, onDragEnd) {
+                if (onDragStart != null && onDragEnd != null) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = {
+                            lastDragPosition = rowTopLeft
+                            onDragStart()
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            lastDragPosition = rowTopLeft + change.position
+                        },
+                        onDragEnd = { onDragEnd(lastDragPosition) },
+                        onDragCancel = { onDragCancel?.invoke() },
+                    )
+                }
+            }
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

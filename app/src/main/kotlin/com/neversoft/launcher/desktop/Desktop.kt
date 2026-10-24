@@ -66,6 +66,8 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -80,6 +82,9 @@ import com.neversoft.launcher.apps.InstalledApp
 import com.neversoft.launcher.apps.InstalledAppsRepository
 import com.neversoft.launcher.data.AppSettings
 import com.neversoft.launcher.files.Trash
+import com.neversoft.launcher.files.DragDropCoordinator
+import com.neversoft.launcher.files.ShortcutStore
+import com.neversoft.launcher.files.FileOpener
 import com.neversoft.launcher.ui.AccentButton
 import com.neversoft.launcher.ui.SubtleButton
 import com.neversoft.launcher.theme.LocalLauncherTheme
@@ -94,7 +99,7 @@ import kotlin.math.roundToInt
 // A desktop icon. Kinds: builtin shell entries, app shortcuts, folders.
 // size is a level 1..5; the icon's on-screen side is that fraction of the
 // page width (see ICON_SIZE_FRACTIONS): 1 = 1/16 of a page, 5 = 1/2 of a page.
-private data class DeskItem(
+internal data class DeskItem(
     val id: String,
     val kind: String, // "builtin" | "app" | "folder"
     val label: String,
@@ -127,6 +132,17 @@ private fun deskItemFrom(json: JSONObject): DeskItem = DeskItem(
     iconPath = json.optString("iconPath", ""),
 )
 
+internal fun DeskItem.toDragPayload(page: Int): DragDropCoordinator.Payload.DesktopShortcut =
+    DragDropCoordinator.Payload.DesktopShortcut(
+        page = page,
+        itemId = id,
+        label = label,
+        packageName = pkg,
+        path = path,
+        kind = kind,
+        iconPath = iconPath,
+    )
+
 private val BUILTINS = listOf(
     DeskItem("bin", "builtin", "Recycle Bin"),
     DeskItem("files", "builtin", "File Explorer"),
@@ -157,6 +173,11 @@ fun Desktop(
     var appPickerOpen by remember { mutableStateOf(false) }
     var pickerApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     var renameTarget by remember { mutableStateOf<DeskItem?>(null) }
+    val iconBounds = remember { mutableStateMapOf<String, androidx.compose.ui.geometry.Rect>() }
+    var lastDragRoot by remember { mutableStateOf(Offset.Zero) }
+    val positions = remember(page) { mutableStateMapOf<String, Offset>() }
+    var desktopBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var dragOrigin by remember { mutableStateOf<Offset?>(null) }
 
     fun persistItems(newItems: List<DeskItem>) {
         items = newItems
@@ -165,6 +186,94 @@ fun Desktop(
                 context, JSONArray().apply { newItems.forEach { put(it.toJson()) } }.toString(), page,
             )
         }
+    }
+
+    fun removeAfterTransfer(item: DeskItem) {
+        persistItems(items - item)
+        positions.remove(item.id)
+        scope.launch {
+            AppSettings.removeDesktopIconPosition(context, page, item.id)
+        }
+    }
+
+    fun insertIntoFolder(source: DragDropCoordinator.Payload, folder: DeskItem): Boolean {
+        val directory = folder.path?.let(::File) ?: return false
+        val inserted = when (source) {
+            is DragDropCoordinator.Payload.DesktopShortcut -> {
+                source.packageName?.let { packageName ->
+                    ShortcutStore.add(
+                        directory,
+                        ShortcutStore.Entry(
+                            id = source.itemId,
+                            label = source.label,
+                            packageName = packageName,
+                            iconPath = source.iconPath,
+                        ),
+                    )
+                } ?: source.path?.let { sourcePath ->
+                    val sourceFile = File(sourcePath)
+                    if (!sourceFile.exists() ||
+                        sourceFile.absolutePath == directory.absolutePath ||
+                        sourceFile.parentFile?.absolutePath == directory.absolutePath ||
+                        (sourceFile.isDirectory &&
+                            directory.absolutePath.startsWith(sourceFile.absolutePath + File.separator))
+                    ) {
+                        false
+                    } else {
+                        val destination = Trash.uniqueName(directory, sourceFile.name)
+                        runCatching {
+                            if (sourceFile.renameTo(destination)) {
+                                true
+                            } else if (sourceFile.copyRecursively(destination)) {
+                                if (sourceFile.deleteRecursively()) {
+                                    true
+                                } else {
+                                    destination.deleteRecursively()
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        }.getOrDefault(false)
+                    }
+                } ?: false
+            }
+            is DragDropCoordinator.Payload.ExplorerShortcut ->
+                ShortcutStore.add(directory, source.entry)
+            is DragDropCoordinator.Payload.ExplorerFile -> {
+                val sourceFile = File(source.path)
+                if (!sourceFile.exists() ||
+                    sourceFile.absolutePath == directory.absolutePath ||
+                    sourceFile.parentFile?.absolutePath == directory.absolutePath ||
+                    (sourceFile.isDirectory &&
+                        directory.absolutePath.startsWith(sourceFile.absolutePath + File.separator))
+                ) {
+                    false
+                } else {
+                    val destination = Trash.uniqueName(directory, sourceFile.name)
+                    runCatching {
+                        if (sourceFile.renameTo(destination)) {
+                            true
+                        } else if (sourceFile.copyRecursively(destination)) {
+                            if (sourceFile.deleteRecursively()) {
+                                true
+                            } else {
+                                destination.deleteRecursively()
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    }.getOrDefault(false)
+                }
+            }
+        }
+        if (inserted && source is DragDropCoordinator.Payload.DesktopShortcut) {
+            val original = items.firstOrNull { it.id == source.itemId }
+            if (original != null) removeAfterTransfer(original)
+        }
+        if (inserted) DragDropCoordinator.notifyChanged()
+        return inserted
     }
 
     // Observe the desktop-items store live, so shortcuts added elsewhere
@@ -260,7 +369,6 @@ fun Desktop(
 
     val cellPx = with(density) { 92.dp.toPx() }
     val marginPx = with(density) { 12.dp.toPx() }
-    val positions = remember(page) { mutableStateMapOf<String, Offset>() }
     var positionsLoaded by remember(page) { mutableStateOf(false) }
 
     // Usable desktop area for grid placement (screen minus taskbar/insets)
@@ -351,7 +459,56 @@ fun Desktop(
             }
             "app" -> item.pkg?.let { InstalledAppsRepository.launch(context, it) }
             "folder" -> item.path?.let { onOpenWindow(WindowContentType.FILE_EXPLORER, item.label, it) }
+            "file" -> item.path?.let { FileOpener.open(context, File(it)) }
         }
+    }
+
+    fun addExplorerItemToDesktop(
+        source: DragDropCoordinator.Payload,
+        rootPosition: Offset,
+    ): Boolean {
+        val local = desktopBounds?.let { rootPosition - it.topLeft } ?: rootPosition
+        val taken = positions.values.toMutableList()
+        val targetPosition = local.let { proposed ->
+            val snapped = Offset(
+                marginPx + ((proposed.x - marginPx) / cellPx).roundToInt().coerceAtLeast(0) * cellPx,
+                marginPx + ((proposed.y - marginPx) / cellPx).roundToInt().coerceAtLeast(0) * cellPx,
+            )
+            if (taken.none { existing ->
+                    kotlin.math.abs(existing.x - snapped.x) < cellPx * 0.5f &&
+                        kotlin.math.abs(existing.y - snapped.y) < cellPx * 0.5f
+                }
+            ) snapped else firstFreeCell(taken)
+        }
+        val item = when (source) {
+            is DragDropCoordinator.Payload.ExplorerShortcut -> {
+                if (items.any { it.id == source.entry.id || it.pkg == source.entry.packageName }) {
+                    return false
+                }
+                DeskItem(
+                    id = source.entry.id,
+                    kind = "app",
+                    label = source.entry.label,
+                    pkg = source.entry.packageName,
+                    iconPath = source.entry.iconPath,
+                )
+            }
+            is DragDropCoordinator.Payload.ExplorerFile -> {
+                val file = File(source.path)
+                if (!file.exists() || items.any { it.path == file.absolutePath }) return false
+                DeskItem(
+                    id = "file_${file.absolutePath.hashCode()}",
+                    kind = if (source.isDirectory) "folder" else "file",
+                    label = file.name,
+                    path = file.absolutePath,
+                )
+            }
+            is DragDropCoordinator.Payload.DesktopShortcut -> return false
+        }
+        positions[item.id] = targetPosition
+        persistItems(items + item)
+        persistPositions()
+        return true
     }
 
     fun newFolder() {
@@ -393,12 +550,21 @@ fun Desktop(
     val pageWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
 
     Box(
-        modifier.pointerInput(Unit) {
+        modifier
+            .onGloballyPositioned { bounds ->
+                desktopBounds = bounds.boundsInRoot()
+                DragDropCoordinator.registerTarget(
+                    id = "desktop-page-$page",
+                    bounds = bounds.boundsInRoot(),
+                    priority = 0,
+                ) { payload, position -> addExplorerItemToDesktop(payload, position) }
+            }
+            .pointerInput(Unit) {
             detectTapGestures(
                 onLongPress = { pos -> desktopMenuAt = pos },
                 onTap = { desktopMenuAt = null },
             )
-        },
+            },
     ) {
         if (itemsLoaded && positionsLoaded) {
             items.forEach { item ->
@@ -428,15 +594,58 @@ fun Desktop(
                                 (current.y + dragAmount.y).coerceAtLeast(0f),
                             )
                         },
+                        onDragStart = { local ->
+                            dragOrigin = positions[item.id]
+                            lastDragRoot = iconBounds[item.id]?.topLeft?.plus(local) ?: local
+                            DragDropCoordinator.begin(item.toDragPayload(page))
+                        },
+                        onDragPosition = { local ->
+                            lastDragRoot = iconBounds[item.id]?.topLeft?.plus(local) ?: local
+                        },
                         onDragEnd = {
                             val current = positions[item.id] ?: Offset.Zero
-                            positions[item.id] = Offset(
+                            val snapped = Offset(
                                 marginPx + ((current.x - marginPx) / cellPx).roundToInt()
                                     .coerceAtLeast(0) * cellPx,
                                 marginPx + ((current.y - marginPx) / cellPx).roundToInt()
                                     .coerceAtLeast(0) * cellPx,
                             )
+                            val otherPositions = positions
+                                .filterKeys { it != item.id }
+                                .values
+                                .toMutableList()
+                            val finalPosition = if (otherPositions.any { other ->
+                                kotlin.math.abs(other.x - snapped.x) < cellPx * 0.5f &&
+                                    kotlin.math.abs(other.y - snapped.y) < cellPx * 0.5f
+                            }) {
+                                firstFreeCell(otherPositions)
+                            } else {
+                                snapped
+                            }
+                            positions[item.id] = finalPosition
                             persistPositions()
+                            DragDropCoordinator.finish(lastDragRoot)
+                            dragOrigin = null
+                        },
+                        onBoundsChanged = { bounds ->
+                            iconBounds[item.id] = bounds
+                            if (item.kind == "folder" && item.path != null) {
+                                DragDropCoordinator.registerTarget(
+                                    id = "desktop-folder-${page}-${item.id}",
+                                    bounds = bounds,
+                                    priority = 20,
+                                ) { payload, _ -> insertIntoFolder(payload, item) }
+                            } else {
+                                DragDropCoordinator.unregisterTarget("desktop-folder-${page}-${item.id}")
+                            }
+                        },
+                        onDragCancel = {
+                            dragOrigin?.let { positions[item.id] = it }
+                            dragOrigin = null
+                            DragDropCoordinator.cancel()
+                        },
+                        onDisposed = {
+                            DragDropCoordinator.unregisterTarget("desktop-folder-${page}-${item.id}")
                         },
                     )
                 }
@@ -593,6 +802,15 @@ fun Desktop(
             onDismiss = { configOpen = false },
         )
     }
+
+    androidx.compose.runtime.DisposableEffect(page) {
+        onDispose {
+            DragDropCoordinator.unregisterTarget("desktop-page-$page")
+            items.filter { it.kind == "folder" }.forEach { item ->
+                DragDropCoordinator.unregisterTarget("desktop-folder-${page}-${item.id}")
+            }
+        }
+    }
 }
 
 @Composable
@@ -608,7 +826,12 @@ private fun DesktopIconWithMenu(
     onChangeIcon: () -> Unit,
     onResetIcon: (() -> Unit)?,
     onDragDelta: (Offset) -> Unit,
+    onDragStart: (Offset) -> Unit,
+    onDragPosition: (Offset) -> Unit,
     onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+    onBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit,
+    onDisposed: () -> Unit,
 ) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
@@ -618,8 +841,14 @@ private fun DesktopIconWithMenu(
     val tileWidth = if (iconSizeDp > 72.dp) iconSizeDp else 72.dp
     // Label scales gently with the icon so big icons don't get a tiny caption.
     val labelSp = (iconSizeDp.value * 0.16f).coerceIn(11f, 22f)
+    androidx.compose.runtime.DisposableEffect(item.id) {
+        onDispose { onDisposed() }
+    }
 
-    Box(modifier) {
+    Box(
+        modifier
+            .onGloballyPositioned { onBoundsChanged(it.boundsInRoot()) },
+    ) {
         Column(
             Modifier
                 .width(tileWidth)
@@ -640,6 +869,7 @@ private fun DesktopIconWithMenu(
                             moved = false
                             pending = Offset.Zero
                             menuOpen = true
+                            onDragStart(Offset.Zero)
                         },
                         onDrag = { change, dragAmount ->
                             change.consume()
@@ -649,13 +879,15 @@ private fun DesktopIconWithMenu(
                                     moved = true
                                     menuOpen = false
                                     onDragDelta(pending)
+                                    onDragPosition(change.position)
                                 }
                             } else {
                                 onDragDelta(dragAmount)
+                                onDragPosition(change.position)
                             }
                         },
-                        onDragEnd = { if (moved) onDragEnd() },
-                        onDragCancel = { if (moved) onDragEnd() },
+                        onDragEnd = { if (moved) onDragEnd() else onDragCancel() },
+                        onDragCancel = { onDragCancel() },
                     )
                 },
             horizontalAlignment = Alignment.CenterHorizontally,

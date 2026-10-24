@@ -25,7 +25,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -134,8 +136,11 @@ private data class NotificationApp(val name: String, val icon: ImageBitmap?)
 private fun NotificationRow(item: NotificationItem, onOpen: () -> Unit, onDismiss: () -> Unit) {
     val theme = LocalLauncherTheme.current
     val context = LocalContext.current
-    val app by produceState(NotificationApp(item.packageName, null), item.packageName, item.smallIcon) {
-        value = withContext(Dispatchers.IO) {
+    var app by remember(item.packageName) {
+        mutableStateOf(NotificationApp(item.packageName, null))
+    }
+    LaunchedEffect(item.packageName, item.smallIcon, context) {
+        app = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             val info = runCatching { pm.getApplicationInfo(item.packageName, 0) }.getOrNull()
             val name = info?.let { runCatching { pm.getApplicationLabel(it).toString() }.getOrNull() }

@@ -57,6 +57,18 @@
             android:launchMode="singleTask"
             android:taskAffinity="com.neversoft.launcher.crash"/>
 
+        <!-- Notification Access is granted by the user in Android Settings.
+             Only the system may bind this service; no Accessibility access. -->
+        <service
+            android:name=".notifications.LauncherNotificationListener"
+            android:label="NeverSoft 11"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService"/>
+            </intent-filter>
+        </service>
+
         <receiver android:name=".receiver.BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>

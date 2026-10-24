@@ -35,7 +35,6 @@ import androidx.compose.material.icons.outlined.Bluetooth
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.WbSunny
@@ -253,18 +252,7 @@ fun CalendarFlyout(
         Column(
             Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Notifications", color = theme.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
-                Text("Clear all", color = theme.accent, fontSize = 12.sp)
-            }
-            Spacer(Modifier.weight(1f))
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Outlined.Notifications, null, Modifier.size(26.dp), tint = theme.textDisabled)
-                Spacer(Modifier.height(6.dp))
-                Text("No new notifications", color = theme.textSecondary, fontSize = 13.sp)
-            }
-            Spacer(Modifier.weight(1f))
+            com.neversoft.launcher.notifications.NotificationPanelContent()
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(theme.divider))
 

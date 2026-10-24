@@ -87,6 +87,22 @@ object AppSettings {
     suspend fun setDesktopItems(context: Context, json: String, page: Int = 1) =
         context.dataStore.edit { it[itemsKeyFor(page)] = json }
 
+    suspend fun removeDesktopItem(context: Context, page: Int, id: String) {
+        context.dataStore.edit { prefs ->
+            val raw = prefs[itemsKeyFor(page)] ?: return@edit
+            val updated = runCatching {
+                val source = org.json.JSONArray(raw)
+                org.json.JSONArray().apply {
+                    for (index in 0 until source.length()) {
+                        val item = source.getJSONObject(index)
+                        if (item.optString("id") != id) put(item)
+                    }
+                }.toString()
+            }.getOrNull() ?: return@edit
+            prefs[itemsKeyFor(page)] = updated
+        }
+    }
+
     // Number of extra blank desktop pages the user added (0..2)
     fun extraPagesFlow(context: Context): Flow<Int> =
         context.dataStore.data.map { (it[KEY_EXTRA_PAGES] ?: "0").toIntOrNull()?.coerceIn(0, 2) ?: 0 }
@@ -234,4 +250,16 @@ object AppSettings {
 
     suspend fun setDesktopIconPositions(context: Context, json: String, page: Int = 1) =
         context.dataStore.edit { it[positionsKeyFor(page)] = json }
+
+    suspend fun removeDesktopIconPosition(context: Context, page: Int, id: String) {
+        context.dataStore.edit { prefs ->
+            val raw = prefs[positionsKeyFor(page)] ?: return@edit
+            val updated = runCatching {
+                val obj = org.json.JSONObject(raw)
+                obj.remove(id)
+                obj.toString()
+            }.getOrNull() ?: return@edit
+            prefs[positionsKeyFor(page)] = updated
+        }
+    }
 }

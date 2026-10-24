@@ -335,6 +335,7 @@ fun WindowContent(
         WindowContentType.FILE_EXPLORER -> FileExplorerWindow(
             initialPath = window.param,
             windowTitle = window.title,
+            windowId = window.id,
         )
         WindowContentType.SETTINGS -> SettingsWindow(
             selectedPreset = selectedPreset,

@@ -9,28 +9,72 @@ import java.io.File
 // Copies user-picked photos into app storage so they survive reboots and
 // permission revocations, and decodes them at a sane size.
 object ImageStore {
-    // Returns the stored file path, or null on failure. Older imports with
-    // the same prefix are deleted.
+    // Validate before publishing. Keep existing files because persisted
+    // shortcuts may still reference them, and copy into app-private storage
+    // so later URI permission changes cannot invalidate a selection.
     fun importImage(context: Context, uri: Uri, prefix: String): String? = runCatching {
         val dir = File(context.filesDir, "images").apply { mkdirs() }
-        val target = File(dir, "$prefix-${System.currentTimeMillis()}.img")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
-        } ?: return null
-        dir.listFiles()
-            ?.filter { it.name.startsWith("$prefix-") && it.absolutePath != target.absolutePath }
-            ?.forEach { it.delete() }
-        target.absolutePath
+        val safePrefix = prefix.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(100)
+        val staging = File.createTempFile("import-", ".tmp", dir)
+        val target = File(dir, "$safePrefix-${java.util.UUID.randomUUID()}.png")
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                staging.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= MAX_IMPORT_BYTES) { "Image exceeds 32 MB" }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            } ?: error("Image is unavailable")
+            require(hasImageHeader(staging)) { "Unsupported image" }
+            val bitmap = decodeSampled(
+                staging.absolutePath,
+                if (prefix == "wallpaper") WALLPAPER_SAMPLE_PX else ICON_SAMPLE_PX,
+            ) ?: error("Image could not be decoded")
+            try {
+                target.outputStream().use {
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+            } finally {
+                bitmap.recycle()
+            }
+            target.absolutePath
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
+        } finally {
+            staging.delete()
+        }
     }.getOrNull()
+
+    private fun hasImageHeader(file: File): Boolean {
+        val header = ByteArray(16)
+        val count = file.inputStream().use { it.read(header) }
+        if (count < 8) return false
+        fun ascii(start: Int, end: Int) =
+            String(header, start, end - start, Charsets.US_ASCII)
+        return (header[0] == 0x89.toByte() && ascii(1, 4) == "PNG") ||
+            (header[0] == 0xff.toByte() && header[1] == 0xd8.toByte() && header[2] == 0xff.toByte()) ||
+            ascii(0, 4) == "GIF8" ||
+            ascii(0, 2) == "BM" ||
+            (count >= 12 && ascii(0, 4) == "RIFF" && ascii(8, 12) == "WEBP") ||
+            (count >= 12 && ascii(4, 8) == "ftyp")
+    }
 
     fun decodeSampled(path: String, targetPx: Int): Bitmap? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0 ||
+            bounds.outWidth.toLong() * bounds.outHeight > MAX_PIXELS
+        ) return null
+        val limit = targetPx.coerceIn(32, WALLPAPER_SAMPLE_PX)
         var sample = 1
-        while (bounds.outWidth / (sample * 2) >= targetPx ||
-            bounds.outHeight / (sample * 2) >= targetPx
-        ) {
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > limit) {
             sample *= 2
         }
         BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
@@ -99,4 +143,9 @@ object ImageStore {
         // Chebyshev distance keeps the threshold intuitive per-channel
         return maxOf(kotlin.math.abs(dr), kotlin.math.abs(dg), kotlin.math.abs(db))
     }
+
+    private const val MAX_IMPORT_BYTES = 32L * 1024 * 1024
+    private const val MAX_PIXELS = 100_000_000L
+    private const val ICON_SAMPLE_PX = 512
+    private const val WALLPAPER_SAMPLE_PX = 2048
 }
